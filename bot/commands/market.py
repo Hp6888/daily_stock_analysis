@@ -124,10 +124,12 @@ class MarketCommand(BotCommand):
             if override_region == "":
                 from src.notification import NotificationService
                 notifier = NotificationService(source_message=message)
+                logger.info("[MarketCommand] 今日相关市场休市，跳过大盘复盘")
                 if notifier.is_available():
                     notifier.send(
                         "🎯 大盘复盘\n\n今日相关市场休市，已跳过大盘复盘。",
                         email_send_to_all=True,
+                        route_type="report",
                     )
                 return
 
@@ -138,13 +140,17 @@ class MarketCommand(BotCommand):
                 config,
                 source_message=message,
             )
-            run_market_review(
+            review_report = run_market_review(
                 notifier=notifier,
                 analyzer=analyzer,
                 search_service=search_service,
                 send_notification=True,
                 override_region=override_region,
             )
+            if review_report:
+                logger.info("[MarketCommand] 大盘复盘完成并已推送")
+            else:
+                logger.warning("[MarketCommand] 大盘复盘返回空结果")
         except Exception as e:
             logger.error("[MarketCommand] 大盘复盘失败: %s", e)
             logger.exception(e)

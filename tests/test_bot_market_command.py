@@ -168,6 +168,7 @@ class MarketCommandRegionFilterTestCase(unittest.TestCase):
         notify_notifier.send.assert_called_once()
         sent = notify_notifier.send.call_args.args[0]
         self.assertIn("休市", sent)
+        self.assertEqual(notify_notifier.send.call_args.kwargs["route_type"], "report")
 
     def test_trading_day_check_disabled_does_not_pass_override(self) -> None:
         """When TRADING_DAY_CHECK_ENABLED=false, override_region stays None."""
