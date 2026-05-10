@@ -25,6 +25,8 @@ const HomePage: React.FC = () => {
   const [isSubmittingMarketReview, setIsSubmittingMarketReview] = useState(false);
   const [marketReviewNotice, setMarketReviewNotice] = useState<MarketReviewNotice>(null);
   const [marketReviewError, setMarketReviewError] = useState<ParsedApiError | null>(null);
+  const [marketReviewReport, setMarketReviewReport] = useState<string | null>(null);
+  const [marketReviewReportCopied, setMarketReviewReportCopied] = useState(false);
   const marketReviewPollTimer = useRef<number | null>(null);
 
   const stopMarketReviewPolling = useCallback(() => {
@@ -145,6 +147,7 @@ const HomePage: React.FC = () => {
       const poll = async (): Promise<boolean> => {
         if (attempts >= maxAttempts) {
           stopMarketReviewPolling();
+          setMarketReviewReport(null);
           setMarketReviewNotice({
             variant: 'danger',
             title: '大盘复盘已超时',
@@ -158,6 +161,7 @@ const HomePage: React.FC = () => {
         try {
           const status = await analysisApi.getStatus(taskId);
           if (status.status === 'pending' || status.status === 'processing') {
+            setMarketReviewReport(null);
             const progress = typeof status.progress === 'number'
               ? `${status.progress}%`
               : '进行中';
@@ -171,10 +175,14 @@ const HomePage: React.FC = () => {
 
           if (status.status === 'completed') {
             stopMarketReviewPolling();
+            const marketReviewText = typeof status.marketReviewReport === 'string'
+              ? status.marketReviewReport
+              : '';
+            setMarketReviewReport(marketReviewText ? marketReviewText.trim() : null);
             setMarketReviewNotice({
               variant: 'success',
               title: '大盘复盘已完成',
-              message: '大盘复盘任务已完成，结果已生成并按配置推送。',
+              message: marketReviewText ? '大盘复盘任务已完成，结果如下：' : '大盘复盘任务已完成，结果已生成并按配置推送。',
             });
             setMarketReviewError(null);
             return false;
@@ -182,6 +190,7 @@ const HomePage: React.FC = () => {
 
           if (status.status === 'failed') {
             stopMarketReviewPolling();
+            setMarketReviewReport(null);
             setMarketReviewError(
               getParsedApiError({
                 response: {
@@ -198,6 +207,7 @@ const HomePage: React.FC = () => {
           }
 
           stopMarketReviewPolling();
+          setMarketReviewReport(null);
           setMarketReviewNotice({
             variant: 'danger',
             title: '大盘复盘状态异常',
@@ -208,6 +218,7 @@ const HomePage: React.FC = () => {
           const parsed = getParsedApiError(err);
           if (attempts >= maxAttempts) {
             stopMarketReviewPolling();
+            setMarketReviewReport(null);
             setMarketReviewError(parsed);
             setMarketReviewNotice(null);
             return false;
@@ -235,6 +246,7 @@ const HomePage: React.FC = () => {
     setIsSubmittingMarketReview(true);
     setMarketReviewNotice(null);
     setMarketReviewError(null);
+    setMarketReviewReport(null);
     try {
       const result = await analysisApi.triggerMarketReview({ sendNotification: notify });
       setMarketReviewNotice({
@@ -253,6 +265,22 @@ const HomePage: React.FC = () => {
       setIsSubmittingMarketReview(false);
     }
   }, [notify, pollMarketReviewStatus]);
+
+  const handleCopyMarketReviewReport = useCallback(() => {
+    if (!marketReviewReport) {
+      return;
+    }
+
+    void navigator.clipboard.writeText(marketReviewReport).then(
+      () => {
+        setMarketReviewReportCopied(true);
+        setTimeout(() => setMarketReviewReportCopied(false), 2000);
+      },
+      (err) => {
+        console.error('复制失败:', err);
+      },
+    );
+  }, [marketReviewReport]);
 
   const handleDeleteSelectedHistory = useCallback(() => {
     void deleteSelectedHistory();
@@ -405,6 +433,27 @@ const HomePage: React.FC = () => {
               className="mb-1"
               onDismiss={() => setMarketReviewError(null)}
             />
+          </div>
+        ) : null}
+
+        {marketReviewReport ? (
+          <div className="px-3 pb-2 md:px-4">
+            <div className="rounded-xl border border-subtle bg-surface/70 px-3 py-3 text-xs text-secondary-text shadow-sm">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="font-semibold text-foreground">大盘复盘报告</p>
+                <button
+                  type="button"
+                  className="home-surface-button h-7 rounded-md px-3 py-1 text-xs text-foreground"
+                  disabled={marketReviewReportCopied}
+                  onClick={() => void handleCopyMarketReviewReport()}
+                >
+                  {marketReviewReportCopied ? '已复制' : '复制'}
+                </button>
+              </div>
+              <pre className="max-h-64 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-background px-3 py-2 leading-relaxed">
+                {marketReviewReport}
+              </pre>
+            </div>
           </div>
         ) : null}
 

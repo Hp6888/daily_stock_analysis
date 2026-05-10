@@ -713,11 +713,29 @@ def get_analysis_status(task_id: str) -> TaskStatus:
     task = task_queue.get_task(task_id)
     
     if task:
+        result: Optional[AnalysisResultResponse] = None
+        market_review_report = None
+
+        if task.status == TaskStatusEnum.COMPLETED and isinstance(task.result, dict):
+            if task.stock_code == "market_review":
+                report_text = task.result.get("result")
+                if isinstance(report_text, str) and report_text.strip():
+                    market_review_report = report_text
+            else:
+                try:
+                    result = AnalysisResultResponse.model_validate(task.result)
+                except Exception:
+                    logger.warning(
+                        "解析任务结果失败，回退为空返回: task_id=%s",
+                        task.task_id,
+                    )
+
         return TaskStatus(
             task_id=task.task_id,
             status=task.status.value,
             progress=task.progress,
-            result=None,  # In-progress tasks do not carry a result payload.
+            result=result,
+            market_review_report=market_review_report,
             error=task.error,
             stock_name=task.stock_name,
             original_query=task.original_query,

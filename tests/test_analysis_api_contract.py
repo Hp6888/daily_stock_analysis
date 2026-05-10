@@ -255,6 +255,30 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             override_region="cn",
         )
 
+    def test_get_analysis_status_returns_market_review_report_from_queue(self) -> None:
+        if get_analysis_status is None or analysis_endpoint_module is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        queue = MagicMock()
+        queue.get_task.return_value = SimpleNamespace(
+            task_id="market-task-1",
+            stock_code="market_review",
+            stock_name="大盘复盘",
+            status=analysis_endpoint_module.TaskStatusEnum.COMPLETED,
+            progress=100,
+            result={"result": "市场复盘报告示例文本"},
+            error=None,
+            original_query=None,
+            selection_source=None,
+        )
+
+        with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue):
+            status = get_analysis_status("market-task-1")
+
+        self.assertEqual(status.status, "completed")
+        self.assertEqual(status.market_review_report, "市场复盘报告示例文本")
+        self.assertIsNone(status.result)
+
     def test_run_market_review_background_raises_when_report_is_empty(self) -> None:
         if analysis_endpoint_module is None:
             self.skipTest("analysis endpoint helpers unavailable in this environment")

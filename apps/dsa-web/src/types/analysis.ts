@@ -158,6 +158,7 @@ export interface TaskStatus {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress?: number;
   result?: AnalysisResult;
+  marketReviewReport?: string;
   error?: string;
   stockName?: string;
   originalQuery?: string;

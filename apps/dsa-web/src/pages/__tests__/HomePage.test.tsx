@@ -175,6 +175,7 @@ describe('HomePage', () => {
     vi.mocked(analysisApi.getStatus).mockResolvedValue({
       taskId: 'task-1',
       status: 'completed',
+      marketReviewReport: '市场复盘报告示例文本',
     });
 
     render(
@@ -189,6 +190,7 @@ describe('HomePage', () => {
       expect(analysisApi.triggerMarketReview).toHaveBeenCalledWith({ sendNotification: true });
     });
     expect(await screen.findByText('大盘复盘已完成')).toBeInTheDocument();
+    expect(await screen.findByText('市场复盘报告示例文本')).toBeInTheDocument();
     expect(analysisApi.getStatus).toHaveBeenCalledWith('task-1');
   });
 
