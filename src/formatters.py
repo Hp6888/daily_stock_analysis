@@ -302,6 +302,169 @@ def _parse_markdown_table_row(row: str) -> List[str]:
     return cells
 
 
+def _is_markdown_table_row(row: str) -> bool:
+    """判断是否为 Markdown 表格行。"""
+    stripped = row.strip()
+    return stripped.startswith("|") and "|" in stripped[1:]
+
+
+def _is_markdown_table_separator(row: str) -> bool:
+    return bool(
+        re.match(r'^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$', row)
+    )
+
+
+def _split_markdown_blocks(content: str) -> List[str]:
+    """按 Markdown 块切分内容，避免在表格、代码块中间做不安全分片。"""
+    if not content:
+        return [""]
+
+    lines = content.splitlines(True)
+    if not lines:
+        return [content]
+
+    blocks: List[str] = []
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        stripped = lines[i].rstrip("\r\n").strip()
+        if stripped.startswith("```"):
+            block = [lines[i]]
+            i += 1
+            while i < n:
+                block.append(lines[i])
+                if lines[i].rstrip("\r\n").strip().startswith("```"):
+                    i += 1
+                    break
+                i += 1
+            blocks.append("".join(block))
+            continue
+
+        if _is_markdown_table_row(stripped):
+            block = [lines[i]]
+            i += 1
+            while i < n and _is_markdown_table_row(lines[i].rstrip("\r\n")):
+                block.append(lines[i])
+                i += 1
+            blocks.append("".join(block))
+            continue
+
+        start = i
+        while i < n:
+            current = lines[i].rstrip("\r\n").strip()
+            if current.startswith("```") or _is_markdown_table_row(current):
+                break
+            i += 1
+        blocks.append("".join(lines[start:i]))
+
+    return [block for block in blocks if block]
+
+
+def _contains_markdown_table(content: str) -> bool:
+    table_row_count = 0
+    for raw_line in content.splitlines():
+        if _is_markdown_table_row(raw_line):
+            table_row_count += 1
+            if table_row_count >= 2:
+                return True
+        else:
+            table_row_count = 0
+    return False
+
+
+def _split_markdown_table_block(content: str, max_bytes: int) -> List[str]:
+    """将单个 Markdown 表格按行拆分，并在每段前补齐表头。"""
+    lines = [line.rstrip() for line in content.splitlines()]
+    if len(lines) < 2:
+        return [content]
+
+    if not _is_markdown_table_row(lines[0]):
+        return [content]
+
+    separator_index = 1 if len(lines) > 1 and _is_markdown_table_separator(lines[1]) else None
+    if separator_index is None:
+        return [content]
+
+    header = lines[0]
+    separator = lines[1]
+    data_rows = [line for line in lines[separator_index + 1:] if line.strip()]
+    if not data_rows:
+        return [content]
+
+    template = [header, separator]
+    if _bytes("\n".join(template)) > max_bytes:
+        return [content]
+
+    chunks: List[str] = []
+    current_rows: List[str] = []
+
+    for row in data_rows:
+        candidate = "\n".join(template + current_rows + [row])
+        if _bytes(candidate) <= max_bytes:
+            current_rows.append(row)
+            continue
+
+        if not current_rows:
+            fallback = _chunk_by_max_bytes(candidate, max_bytes)
+            chunks.extend(fallback)
+            current_rows = []
+            continue
+
+        chunks.append("\n".join(template + current_rows))
+        current_rows = [row]
+        if _bytes("\n".join(template + current_rows)) > max_bytes:
+            fallback = _chunk_by_max_bytes("\n".join(template + current_rows), max_bytes)
+            chunks.extend(fallback)
+            current_rows = []
+
+    if current_rows:
+        chunks.append("\n".join(template + current_rows))
+
+    return chunks or [content]
+
+
+def _chunk_markdown_content_by_max_bytes(content: str, max_bytes: int) -> List[str]:
+    """按块结构分片，表格块跨片时保留表头。"""
+    if not content:
+        return [""]
+
+    blocks = _split_markdown_blocks(content)
+    current = ""
+    chunks: List[str] = []
+
+    for block in blocks:
+        block_chunks: List[str] = [block]
+        if _contains_markdown_table(block):
+            block_chunks = _split_markdown_table_block(block, max_bytes)
+
+        for block_chunk in block_chunks:
+            if not block_chunk:
+                continue
+
+            if _bytes(block_chunk) > max_bytes:
+                if current:
+                    chunks.append(current)
+                    current = ""
+                chunks.extend(_chunk_by_max_bytes(block_chunk, max_bytes))
+                continue
+
+            if not current:
+                current = block_chunk
+                continue
+
+            if _bytes(current + block_chunk) > max_bytes:
+                chunks.append(current)
+                current = block_chunk
+            else:
+                current += block_chunk
+
+    if current:
+        chunks.append(current)
+
+    return chunks or [""]
+
+
 def _chunk_by_max_bytes(content: str, max_bytes: int) -> List[str]:
     if _bytes(content) <= max_bytes:
         return [content]
@@ -338,73 +501,78 @@ def chunk_content_by_max_bytes(content: str, max_bytes: int, add_page_marker: bo
     Returns:
         分割后的区块列表
     """
-    def _chunk(content: str, max_bytes: int) -> List[str]:
-        # 优先按分隔线/标题分割，保证分页自然
-        if max_bytes < MIN_MAX_BYTES:
-            raise ValueError(f"max_bytes={max_bytes} < {MIN_MAX_BYTES}, 可能陷入无限递归。")
-        
-        if _bytes(content) <= max_bytes:
-            return [content]
-        
-        sections, separator = _chunk_by_separators(content)
-        if separator == "" and len(sections) == 1:
-            # 无法智能分割，则强制按字数分割
-            return _chunk_by_max_bytes(content, max_bytes)
-        
-        chunks: List[str] = []
-        current_chunk: List[str] = []
-        current_bytes = 0
-        separator_bytes = _bytes(separator) if separator else 0
-        effective_max_bytes = max_bytes - separator_bytes
-
-        for section in sections:
-            section += separator
-            section_bytes = _bytes(section)
-            
-            # 如果单个 section 就超长，需要强制截断
-            if section_bytes > effective_max_bytes:
-                # 先保存当前积累的内容
-                if current_chunk:
-                    chunks.append("".join(current_chunk))
-                    current_chunk = []
-                    current_bytes = 0
-
-                # 强制按字节截断，避免整段被截断丢失
-                section_chunks = _chunk(
-                    section[:-separator_bytes], effective_max_bytes
-                )
-                section_chunks[-1] = section_chunks[-1] + separator
-                chunks.extend(section_chunks)
-                continue
-
-            # 检查加入后是否超长
-            if current_bytes + section_bytes > effective_max_bytes:
-                # 保存当前块，开始新块
-                if current_chunk:
-                    chunks.append("".join(current_chunk))
-                current_chunk = [section]
-                current_bytes = section_bytes
-            else:
-                current_chunk.append(section)
-                current_bytes += section_bytes
-                
-        # 添加最后一块
-        if current_chunk:
-            chunks.append("".join(current_chunk))
-            
-        # 移除最后一个块的分割符
-        if (chunks and 
-            len(chunks[-1]) > separator_bytes and 
-            chunks[-1][-separator_bytes:] == separator
-        ):
-            chunks[-1] = chunks[-1][:-separator_bytes]
-        
-        return chunks
-    
     if add_page_marker:
         max_bytes = max_bytes - PAGE_MARKER_SAFE_BYTES
-    
-    chunks = _chunk(content, max_bytes)
+
+    if _contains_markdown_table(content):
+        chunks = _chunk_markdown_content_by_max_bytes(content, max_bytes)
+    else:
+        def _chunk(content: str, max_bytes: int) -> List[str]:
+            # 优先按分隔线/标题分割，保证分页自然
+            if max_bytes < MIN_MAX_BYTES:
+                raise ValueError(f"max_bytes={max_bytes} < {MIN_MAX_BYTES}, 可能陷入无限递归。")
+        
+            if _bytes(content) <= max_bytes:
+                return [content]
+
+            sections, separator = _chunk_by_separators(content)
+            if separator == "" and len(sections) == 1:
+                # 无法智能分割，则强制按字数分割
+                return _chunk_by_max_bytes(content, max_bytes)
+
+            chunks: List[str] = []
+            current_chunk: List[str] = []
+            current_bytes = 0
+            separator_bytes = _bytes(separator) if separator else 0
+            effective_max_bytes = max_bytes - separator_bytes
+
+            for section in sections:
+                section += separator
+                section_bytes = _bytes(section)
+
+                # 如果单个 section 就超长，需要强制截断
+                if section_bytes > effective_max_bytes:
+                    # 先保存当前积累的内容
+                    if current_chunk:
+                        chunks.append("".join(current_chunk))
+                        current_chunk = []
+                        current_bytes = 0
+
+                    # 强制按字节截断，避免整段被截断丢失
+                    section_chunks = _chunk(
+                        section[:-separator_bytes], effective_max_bytes
+                    )
+                    section_chunks[-1] = section_chunks[-1] + separator
+                    chunks.extend(section_chunks)
+                    continue
+
+                # 检查加入后是否超长
+                if current_bytes + section_bytes > effective_max_bytes:
+                    # 保存当前块，开始新块
+                    if current_chunk:
+                        chunks.append("".join(current_chunk))
+                    current_chunk = [section]
+                    current_bytes = section_bytes
+                else:
+                    current_chunk.append(section)
+                    current_bytes += section_bytes
+
+            # 添加最后一块
+            if current_chunk:
+                chunks.append("".join(current_chunk))
+
+            # 移除最后一个块的分割符
+            if (
+                chunks
+                and len(chunks[-1]) > separator_bytes
+                and chunks[-1][-separator_bytes:] == separator
+            ):
+                chunks[-1] = chunks[-1][:-separator_bytes]
+
+            return chunks
+
+        chunks = _chunk(content, max_bytes)
+
     if add_page_marker:
         total_chunks = len(chunks)
         for i, chunk in enumerate(chunks):

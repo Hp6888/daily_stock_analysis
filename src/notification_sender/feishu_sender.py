@@ -26,21 +26,6 @@ from src.formatters import (
 
 logger = logging.getLogger(__name__)
 
-
-def _contains_markdown_table(content: str) -> bool:
-    """Return whether content contains consecutive Markdown table rows."""
-    table_row_count = 0
-    for raw_line in content.splitlines():
-        stripped = raw_line.strip()
-        if stripped.startswith("|") and "|" in stripped[1:]:
-            table_row_count += 1
-            if table_row_count >= 2:
-                return True
-            continue
-        table_row_count = 0
-    return False
-
-
 class FeishuSender:
     
     def __init__(self, config: Config):
@@ -172,7 +157,8 @@ class FeishuSender:
         Returns:
             是否全部发送成功
         """
-        chunk_source = format_feishu_markdown(content) if _contains_markdown_table(content) else content
+        # 表格跨分片时保留块结构（尤其是表头），避免续片缺少上下文导致渲染失真。
+        chunk_source = content
         try:
             chunks = chunk_content_by_max_bytes(chunk_source, max_bytes, add_page_marker=True)
         except ValueError as e:

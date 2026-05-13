@@ -175,6 +175,26 @@ class TestChunkContentByMaxBytes(unittest.TestCase):
         joined = "".join(c.replace(TRUNCATION_SUFFIX, "") for c in result)
         self.assertEqual(joined, text)
 
+    def test_chunked_table_content_reuses_table_header_each_chunk(self):
+        rows = "\n".join(
+            f"| 股票{i:03d} | 名称{i:03d} | {1000 + i} |"
+            for i in range(20)
+        )
+        content = "\n".join(
+            ["| 股票代码 | 名称 | 热度 |", "| --- | --- | --- |", rows]
+        )
+        result = chunk_content_by_max_bytes(content, 140)
+
+        self.assertGreaterEqual(len(result), 2)
+        for chunk in result:
+            table_rows = [
+                line.strip()
+                for line in chunk.splitlines()
+                if line.strip().startswith("|") and "|" in line[1:]
+            ]
+            if table_rows:
+                self.assertEqual(table_rows[0], "| 股票代码 | 名称 | 热度 |")
+
     def test_slice_at_max_bytes_returns_truncated_and_remaining_parts(self):
         chunk, remaining = slice_at_max_bytes("测试ABC", 7)
         self.assertEqual(chunk, "测试A")

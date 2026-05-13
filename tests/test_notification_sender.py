@@ -259,6 +259,11 @@ class TestFeishuSender(unittest.TestCase):
         self.assertIn("000006", serialized)
         self.assertNotIn("**000002**", serialized)
         self.assertNotIn("**000006**", serialized)
+        for elements in continuation_elements:
+            chunk_serialized = json.dumps(elements, ensure_ascii=False)
+            self.assertIn("**代码**", chunk_serialized)
+            self.assertIn("**名称**", chunk_serialized)
+            self.assertIn("**热度**", chunk_serialized)
 
     @mock.patch("src.notification_sender.feishu_sender.requests.post")
     def test_send_error_response_returns_false(self, mock_post):
