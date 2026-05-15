@@ -26,7 +26,7 @@ if _orig_data_provider is None:
     pkg_mod.base = sys.modules["data_provider.base"]
     sys.modules["data_provider"] = pkg_mod
 
-from src.services.task_queue import AnalysisTaskQueue, TaskStatus, get_task_queue, _dedupe_stock_code_key
+from src.services.task_queue import AnalysisTaskQueue, TaskInfo, TaskStatus, get_task_queue, _dedupe_stock_code_key
 
 if _orig_data_provider_base is None:
     sys.modules.pop("data_provider.base", None)
@@ -140,6 +140,50 @@ class TaskQueueConfigSyncTestCase(unittest.TestCase):
         self.assertEqual(payload["subject"], "600519")
         self.assertEqual(payload["run_id"], "run_ext_1")
         self.assertEqual(payload["caller"], "agent")
+
+    def test_completed_plugin_task_dict_exposes_action_result(self) -> None:
+        queue = AnalysisTaskQueue(max_workers=1)
+
+        class SyncExecutor:
+            def submit(self, func, *args):
+                future = Future()
+                future.set_result(func(*args))
+                return future
+
+        queue._executor = SyncExecutor()
+        action_result = {
+            "action_id": "dsa.analyze_stock",
+            "run_id": "run_ext_done",
+            "ok": True,
+            "status": "completed",
+            "data": {"symbol": "600519"},
+        }
+
+        task = queue.submit_background_task(
+            lambda: action_result,
+            stock_code="dsa.analyze_stock",
+            report_type="plugin",
+            task_type="plugin",
+            action_id="dsa.analyze_stock",
+            subject="600519",
+            run_id="run_ext_done",
+            caller="agent",
+        )
+
+        queried = queue.get_task(task.task_id)
+        payload = queried.to_dict()
+        self.assertEqual(queried.status, TaskStatus.COMPLETED)
+        self.assertEqual(payload["result"], action_result)
+
+    def test_completed_analysis_task_dict_does_not_expose_full_result(self) -> None:
+        task_info = TaskInfo(
+            task_id="analysis-task",
+            stock_code="600519",
+            status=TaskStatus.COMPLETED,
+            result={"stock_code": "600519", "report": {"summary": "large"}},
+        )
+
+        self.assertNotIn("result", task_info.to_dict())
 
     def test_submit_background_task_keeps_extension_metadata_in_pending_query(self) -> None:
         queue = AnalysisTaskQueue(max_workers=1)

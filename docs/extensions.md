@@ -72,7 +72,7 @@ MVP 已实现 Action allowlist、confirmation guard、timeout guard 和 call dep
 
 ## 异步任务与 Evidence
 
-异步 Action 复用 `AnalysisTaskQueue.submit_background_task()`，并在队列对象内保存 `task_type=plugin`、`action_id`、`run_id`、`caller`、`subject` 元数据，以便任务面板与 API 在 pending/processing 阶段可追踪来源。
+异步 Action 复用 `AnalysisTaskQueue.submit_background_task()`，并在队列对象内保存 `task_type=plugin`、`action_id`、`run_id`、`caller`、`subject` 元数据，以便任务面板与 API 在 pending/processing 阶段可追踪来源；任务完成后，`GET /api/v1/analysis/status/{task_id}`、任务列表和 SSE `task_completed` 事件会暴露对应的 `ActionResult` 字典，供轮询客户端读取异步 Action 输出。
 
 Evidence Store 后续至少记录 `run_id`、`action_id`、`input_hash`、`source_chain`、`raw_result`、`normalized_result`、`warnings`、`degradation`、`created_at`。AlphaSift 候选发现还应记录策略、市场、adapter mode、插件版本、耗时、候选池和 DSA 深度分析关联。
 

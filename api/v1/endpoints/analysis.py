@@ -579,6 +579,7 @@ def get_task_list(
             created_at=t.created_at.isoformat(),
             started_at=t.started_at.isoformat() if t.started_at else None,
             completed_at=t.completed_at.isoformat() if t.completed_at else None,
+            result=_plugin_task_result(t),
             error=t.error,
             original_query=t.original_query,
             selection_source=t.selection_source,
@@ -679,6 +680,24 @@ def _format_sse_event(event_type: str, data: Dict[str, Any]) -> str:
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _is_plugin_task(task: Any) -> bool:
+    """Return whether a queued task represents an Extension Runtime action."""
+    return (
+        getattr(task, "task_type", None) == "plugin"
+        or getattr(task, "report_type", None) == "plugin"
+        or bool(getattr(task, "action_id", None))
+    )
+
+
+def _plugin_task_result(task: Any) -> Optional[Dict[str, Any]]:
+    status = getattr(task, "status", None)
+    status_value = getattr(status, "value", status)
+    result = getattr(task, "result", None)
+    if status_value == "completed" and _is_plugin_task(task) and isinstance(result, dict):
+        return result
+    return None
+
+
 # ============================================================
 # GET /status/{task_id} - 查询单个任务状态
 # ============================================================
@@ -713,7 +732,7 @@ def get_analysis_status(task_id: str) -> TaskStatus:
     task = task_queue.get_task(task_id)
     
     if task:
-        result: Optional[AnalysisResultResponse] = None
+        result: Optional[Union[AnalysisResultResponse, Dict[str, Any]]] = None
         market_review_report = None
 
         if task.status == TaskStatusEnum.COMPLETED and isinstance(task.result, dict):
@@ -721,6 +740,8 @@ def get_analysis_status(task_id: str) -> TaskStatus:
                 report_text = task.result.get("result")
                 if isinstance(report_text, str) and report_text.strip():
                     market_review_report = report_text
+            elif _is_plugin_task(task):
+                result = task.result
             else:
                 try:
                     result = AnalysisResultResponse.model_validate(task.result)

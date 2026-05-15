@@ -24,6 +24,7 @@ try:
         _handle_sync_analysis,
         _build_analysis_report,
         _load_sync_fundamental_sources,
+        get_task_list,
         get_analysis_status,
     )
 except Exception:  # pragma: no cover - optional dependency environments
@@ -34,6 +35,7 @@ except Exception:  # pragma: no cover - optional dependency environments
     _handle_sync_analysis = None
     _build_analysis_report = None
     _load_sync_fundamental_sources = None
+    get_task_list = None
     get_analysis_status = None
 
 from src.enums import ReportType
@@ -278,6 +280,84 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         self.assertEqual(status.status, "completed")
         self.assertEqual(status.market_review_report, "市场复盘报告示例文本")
         self.assertIsNone(status.result)
+
+    def test_get_analysis_status_returns_plugin_action_result_from_queue(self) -> None:
+        if get_analysis_status is None or analysis_endpoint_module is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        action_result = {
+            "action_id": "dsa.analyze_stock",
+            "run_id": "run_ext_done",
+            "ok": True,
+            "status": "completed",
+            "data": {"symbol": "600519"},
+        }
+        queue = MagicMock()
+        queue.get_task.return_value = SimpleNamespace(
+            task_id="plugin-task-1",
+            stock_code="600519",
+            stock_name="Run DSA stock analysis",
+            status=analysis_endpoint_module.TaskStatusEnum.COMPLETED,
+            progress=100,
+            result=action_result,
+            error=None,
+            original_query=None,
+            selection_source=None,
+            task_type="plugin",
+            report_type="plugin",
+            action_id="dsa.analyze_stock",
+        )
+
+        with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue):
+            status = get_analysis_status("plugin-task-1")
+
+        self.assertEqual(status.status, "completed")
+        self.assertEqual(status.result, action_result)
+
+    def test_get_task_list_returns_plugin_action_result(self) -> None:
+        if get_task_list is None or analysis_endpoint_module is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        action_result = {
+            "action_id": "dsa.analyze_stock",
+            "run_id": "run_ext_done",
+            "ok": True,
+            "status": "completed",
+            "data": {"symbol": "600519"},
+        }
+        queue = MagicMock()
+        queue.list_all_tasks.return_value = [
+            SimpleNamespace(
+                task_id="plugin-task-1",
+                stock_code="600519",
+                stock_name="Run DSA stock analysis",
+                status=analysis_endpoint_module.TaskStatusEnum.COMPLETED,
+                progress=100,
+                message="任务执行完成",
+                report_type="plugin",
+                created_at=datetime(2026, 1, 1, 10, 0, 0),
+                started_at=datetime(2026, 1, 1, 10, 0, 1),
+                completed_at=datetime(2026, 1, 1, 10, 0, 2),
+                result=action_result,
+                error=None,
+                original_query=None,
+                selection_source=None,
+                task_type="plugin",
+                action_id="dsa.analyze_stock",
+            )
+        ]
+        queue.get_task_stats.return_value = {
+            "total": 1,
+            "pending": 0,
+            "processing": 0,
+            "completed": 1,
+            "failed": 0,
+        }
+
+        with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue):
+            response = get_task_list(status=None, limit=20)
+
+        self.assertEqual(response.tasks[0].result, action_result)
 
     def test_run_market_review_background_raises_when_report_is_empty(self) -> None:
         if analysis_endpoint_module is None:

@@ -160,6 +160,44 @@ class ExtensionRuntimeTestCase(unittest.TestCase):
         self.assertEqual(result.task_id, "task_123")
         self.assertEqual(task_runner.calls[0], {"action_id": "test.async_echo", "payload": {"symbol": "600519"}, "caller": "agent"})
 
+    def test_async_action_success_stores_action_result_for_polling(self):
+        class SyncExecutor:
+            def submit(self, func, *args):
+                future = Future()
+                future.set_result(func(*args))
+                return future
+
+        original_instance = AnalysisTaskQueue._instance
+        AnalysisTaskQueue._instance = None
+        try:
+            queue = AnalysisTaskQueue(max_workers=1)
+            queue._executor = SyncExecutor()
+            runtime = self._runtime(
+                ActionDefinition(
+                    "test.async_echo",
+                    "test",
+                    "Async echo",
+                    _echo,
+                    mode=ActionMode.ASYNC,
+                    subject_key="symbol",
+                ),
+                task_runner=ActionTaskRunner(queue_factory=lambda: queue),
+            )
+
+            accepted = runtime.execute_action("test.async_echo", {"symbol": "600519"}, {"caller": "agent"})
+            task = queue.get_task(accepted.task_id)
+
+            self.assertTrue(accepted.ok)
+            self.assertEqual(accepted.status, "accepted")
+            self.assertEqual(task.status, TaskStatus.COMPLETED)
+            self.assertEqual(task.result["action_id"], "test.async_echo")
+            self.assertEqual(task.result["run_id"], accepted.run_id)
+            self.assertTrue(task.result["ok"])
+            self.assertEqual(task.result["data"]["payload"], {"symbol": "600519"})
+            self.assertEqual(task.to_dict()["result"], task.result)
+        finally:
+            AnalysisTaskQueue._instance = original_instance
+
     def test_async_action_failure_marks_queue_task_failed(self):
         class SyncExecutor:
             def submit(self, func, *args):

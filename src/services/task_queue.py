@@ -76,10 +76,18 @@ class TaskInfo:
     subject: Optional[str] = None
     run_id: Optional[str] = None
     caller: Optional[str] = None
+
+    def _public_result(self) -> Optional[Dict[str, Any]]:
+        """Return result payloads that are safe to expose in task events."""
+        if self.status != TaskStatus.COMPLETED:
+            return None
+        if self.task_type == "plugin" or self.report_type == "plugin" or self.action_id:
+            return self.result
+        return None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert task info into an API-friendly dictionary."""
-        return {
+        payload = {
             "task_id": self.task_id,
             "stock_code": self.stock_code,
             "stock_name": self.stock_name,
@@ -99,6 +107,10 @@ class TaskInfo:
             "run_id": self.run_id,
             "caller": self.caller,
         }
+        result = self._public_result()
+        if result is not None:
+            payload["result"] = result
+        return payload
     
     def copy(self) -> 'TaskInfo':
         """Create a shallow copy of the task information."""

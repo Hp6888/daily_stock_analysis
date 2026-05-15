@@ -10,7 +10,7 @@
 3. 定义异步任务队列相关模型
 """
 
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict, Union
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -240,9 +240,9 @@ class TaskStatus(BaseModel):
         ge=0,
         le=100
     )
-    result: Optional[AnalysisResultResponse] = Field(
+    result: Optional[Union[AnalysisResultResponse, Dict[str, Any]]] = Field(
         None, 
-        description="分析结果（仅在 completed 时存在）"
+        description="分析结果或插件 Action 结果（仅在 completed 时存在）"
     )
     market_review_report: Optional[str] = Field(
         None,
@@ -293,6 +293,10 @@ class TaskInfo(BaseModel):
     created_at: str = Field(..., description="创建时间")
     started_at: Optional[str] = Field(None, description="开始执行时间")
     completed_at: Optional[str] = Field(None, description="完成时间")
+    result: Optional[Dict[str, Any]] = Field(
+        None,
+        description="插件 Action 结果（仅插件任务 completed 时存在）",
+    )
     error: Optional[str] = Field(None, description="错误信息（仅在 failed 时存在）")
     original_query: Optional[str] = Field(None, description="用户原始输入")
     selection_source: Optional[str] = Field(
