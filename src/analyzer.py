@@ -1913,7 +1913,7 @@ class GeminiAnalyzer:
     @staticmethod
     def _legacy_router_provider_alias(model: str) -> str:
         provider = model.split("/", 1)[0] if "/" in model else "openai"
-        return f"__legacy_{provider}"
+        return f"__legacy_{provider}__"
 
     @staticmethod
     def _build_legacy_router_model_list_from_config(

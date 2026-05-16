@@ -151,13 +151,15 @@ class TestAnalyzerGenerateText:
             cfg.anthropic_api_keys = []
             cfg.deepseek_api_keys = []
             cfg.openai_api_keys = ["sk-openai-legacy-a", "sk-openai-legacy-b"]
-            cfg.openai_base_url = "https://strict.example/v1"
+            cfg.openai_base_url = None
             cfg.llm_model_list = [
                 {
                     "model_name": "__legacy_openai__",
                     "litellm_params": {
                         "model": "__legacy_openai__",
                         "api_key": "sk-openai-legacy-a",
+                        "api_base": "https://legacy-a.example/v1",
+                        "extra_headers": {"x-tenant": "legacy-a"},
                     },
                 },
                 {
@@ -165,6 +167,8 @@ class TestAnalyzerGenerateText:
                     "litellm_params": {
                         "model": "__legacy_openai__",
                         "api_key": "sk-openai-legacy-b",
+                        "api_base": "https://legacy-b.example/v1",
+                        "extra_headers": {"x-tenant": "legacy-b"},
                     },
                 },
             ]
@@ -193,6 +197,14 @@ class TestAnalyzerGenerateText:
         assert passed_model_list is not None
         assert len(passed_model_list) == 2
         assert all(item["litellm_params"].get("model") == "openai/gpt-4o-mini" for item in passed_model_list)
+        assert [item["litellm_params"]["api_base"] for item in passed_model_list] == [
+            "https://legacy-a.example/v1",
+            "https://legacy-b.example/v1",
+        ]
+        assert [item["litellm_params"]["extra_headers"] for item in passed_model_list] == [
+            {"x-tenant": "legacy-a"},
+            {"x-tenant": "legacy-b"},
+        ]
 
     @patch("src.analyzer.Router")
     def test_analyzer_legacy_router_recovery_cache_is_scoped_by_api_base(self, mock_router):
