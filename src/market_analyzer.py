@@ -742,31 +742,21 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return "\n".join(lines)
 
     def _build_news_block(self, news: List) -> str:
-        """Build a source-aware news catalyst table for the rendered report."""
+        """Build a compact source-aware news catalyst list for the rendered report."""
         if not news:
             return ""
-        if self._get_review_language() == "en":
+        language = self._get_review_language()
+        if language == "en":
             lines = [
                 "#### News Catalysts",
-                "| # | Headline | Snippet / Lead | Source |",
-                "|---|----------|----------------|--------|",
             ]
         else:
             lines = [
-                "#### 近三日催化线索",
-                "| 序号 | 事件/标题 | 摘要/线索片段 | 来源 |",
-                "|------|-----------|----------------|------|",
+                "#### 近三日市场线索",
             ]
 
         for idx, item in enumerate(news[:5], 1):
-            title = self._escape_table_cell(
-                self._compact_news_text(self._get_news_field(item, "title"), limit=80) or "-"
-            )
-            snippet = self._escape_table_cell(
-                self._compact_news_text(self._get_news_field(item, "snippet"), limit=180) or "-"
-            )
-            source = self._escape_table_cell(self._format_news_source_cell(item) or "-")
-            lines.append(f"| {idx} | {title} | {snippet} | {source} |")
+            lines.append(self._format_news_catalyst_line(idx, item, language=language))
         return "\n".join(lines)
 
     @staticmethod
@@ -780,15 +770,21 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return str(value).strip()
 
     @classmethod
-    def _format_news_source_cell(cls, item: Any) -> str:
+    def _format_news_catalyst_line(cls, idx: int, item: Any, *, language: str = "zh") -> str:
+        fallback_title = "Untitled catalyst" if language == "en" else "未命名线索"
+        title = cls._compact_news_text(cls._get_news_field(item, "title"), limit=90) or fallback_title
         source = cls._compact_news_text(cls._get_news_field(item, "source"), limit=40)
         date_text = cls._compact_news_text(cls._get_news_field(item, "published_date"), limit=24)
         url = cls._compact_news_text(cls._get_news_field(item, "url"), limit=0)
-        label_parts = [part for part in (source, date_text) if part]
-        label = " / ".join(label_parts)
+        title_text = cls._escape_markdown_link_label(title)
         if url:
-            return f"[{label or 'URL'}]({url})"
-        return label
+            title_text = f"[{title_text}]({url})"
+        meta_parts = [part for part in (source, date_text) if part]
+        if language == "en":
+            meta = f" ({' / '.join(meta_parts)})" if meta_parts else ""
+        else:
+            meta = f"（{' / '.join(meta_parts)}）" if meta_parts else ""
+        return f"- {idx}. {title_text}{meta}"
 
     @staticmethod
     def _compact_news_text(value: str, *, limit: int) -> str:
@@ -814,8 +810,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return f"{numeric_value:+.2f}%"
 
     @staticmethod
-    def _escape_table_cell(value: str) -> str:
-        return value.replace("|", "\\|")
+    def _escape_markdown_link_label(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
     @staticmethod
     def _describe_turnover(total_amount: float) -> str:
