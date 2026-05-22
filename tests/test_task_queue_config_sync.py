@@ -17,7 +17,16 @@ _orig_data_provider = sys.modules.get("data_provider")
 if _orig_data_provider_base is None:
     base_mod = types.ModuleType("data_provider.base")
     base_mod.canonical_stock_code = lambda x: (x or "").strip().upper()
-    base_mod.normalize_stock_code = lambda x: (x or "").strip().upper().removesuffix(".SH").removesuffix(".SZ")
+
+    def _normalize_stub(x):
+        text = (x or "").strip().upper()
+        if "." in text:
+            left, right = text.split(".", 1)
+            if left in {"SH", "SZ", "SS", "BJ"} and right.isdigit():
+                return right
+        return text.removesuffix(".SH").removesuffix(".SZ")
+
+    base_mod.normalize_stock_code = _normalize_stub
     sys.modules["data_provider.base"] = base_mod
 
 if _orig_data_provider is None:
@@ -98,6 +107,7 @@ class TaskQueueConfigSyncTestCase(unittest.TestCase):
 
     def test_dedupe_stock_code_key_normalizes_market_suffix(self) -> None:
         self.assertEqual(_dedupe_stock_code_key(" 600519.sh "), "600519")
+        self.assertEqual(_dedupe_stock_code_key(" SH.600519 "), "600519")
 
     def test_get_task_queue_defers_sync_when_busy(self) -> None:
         queue = AnalysisTaskQueue(max_workers=3)

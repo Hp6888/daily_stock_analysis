@@ -74,7 +74,7 @@ def normalize_stock_code(stock_code: str) -> str:
     - 'SZ000001'    -> '000001'   (strip SZ prefix)
     - 'BJ920748'    -> '920748'   (strip BJ prefix, BSE)
     - 'sh600519'    -> '600519'   (case-insensitive)
-    - 'sh.600519'   -> 'sh.600519' (preserve dotted SH prefix)
+    - 'sh.600519'   -> '600519'   (strip dotted SH prefix)
     - '600519.SH'   -> '600519'   (strip .SH suffix)
     - '000001.SZ'   -> '000001'   (strip .SZ suffix)
     - '920748.BJ'   -> '920748'   (strip .BJ suffix, BSE)
@@ -83,8 +83,8 @@ def normalize_stock_code(stock_code: str) -> str:
     - 'AAPL'        -> 'AAPL'     (keep US stock ticker as-is)
 
     This function is applied at the DataProviderManager layer. Most A-share
-    inputs are reduced to a clean 6-digit code, while dotted exchange prefixes
-    are preserved to avoid losing explicit routing intent.
+    inputs are reduced to a clean 6-digit code so market routing, cache keys,
+    and duplicate detection all share the same equivalence class.
     """
     code = stock_code.strip()
     upper = code.upper()
@@ -95,12 +95,12 @@ def normalize_stock_code(stock_code: str) -> str:
         if candidate.isdigit() and 1 <= len(candidate) <= 5:
             return f"HK{candidate.zfill(5)}"
 
-    # Preserve dotted exchange prefixes so ambiguous symbols such as
-    # SH.000001/SZ.000001 keep the user's explicit exchange intent.
+    # Strip dotted exchange prefixes for global normalization. Provider-level
+    # routing can still inspect the raw user input before calling this helper.
     if '.' in code:
         prefix, base = code.split('.', 1)
         if prefix.upper() in ('SH', 'SZ', 'SS', 'BJ') and base.isdigit():
-            return code
+            return base
 
     # Strip SH/SZ prefix (e.g. SH600519 -> 600519)
     if upper.startswith(('SH', 'SZ')) and not upper.startswith('SH.') and not upper.startswith('SZ.'):
@@ -124,6 +124,15 @@ def normalize_stock_code(stock_code: str) -> str:
             return base
 
     return code
+
+
+def _has_dotted_a_share_prefix(stock_code: str) -> bool:
+    """Return True when raw input carries SH./SZ./SS./BJ. exchange intent."""
+    code = (stock_code or "").strip()
+    if "." not in code:
+        return False
+    prefix, base = code.split(".", 1)
+    return prefix.upper() in ("SH", "SZ", "SS", "BJ") and base.isdigit()
 
 
 ETF_PREFIXES = ("51", "52", "56", "58", "15", "16", "18")
@@ -1155,8 +1164,10 @@ class DataFetcherManager:
         """
         from .us_index_mapping import is_us_index_code, is_us_stock_code
 
-        # Normalize code while preserving dotted exchange hints.
+        raw_stock_code = (stock_code or "").strip()
+        # Normalize for market routing and shared cache/dedupe equivalence.
         stock_code = normalize_stock_code(stock_code)
+        fetch_stock_code = raw_stock_code if _has_dotted_a_share_prefix(raw_stock_code) else stock_code
 
         fetchers = self._get_fetchers_snapshot()
         errors = []
@@ -1240,7 +1251,7 @@ class DataFetcherManager:
                 df = self._call_fetcher_method(
                     fetcher,
                     "get_daily_data",
-                    stock_code=stock_code,
+                    stock_code=fetch_stock_code,
                     start_date=start_date,
                     end_date=end_date,
                     days=days
@@ -1381,7 +1392,7 @@ class DataFetcherManager:
             UnifiedRealtimeQuote 对象，所有数据源都失败则返回 None
         """
         raw_stock_code = (stock_code or "").strip()
-        # Normalize code while preserving dotted exchange hints.
+        # Normalize code for market routing and provider cache lookups.
         stock_code = normalize_stock_code(stock_code)
 
         from .akshare_fetcher import _is_us_code
@@ -1619,7 +1630,7 @@ class DataFetcherManager:
         Returns:
             ChipDistribution 对象，失败则返回 None
         """
-        # Normalize code while preserving dotted exchange hints.
+        # Normalize code for provider cache lookups.
         stock_code = normalize_stock_code(stock_code)
 
         from .realtime_types import get_chip_circuit_breaker
@@ -1691,7 +1702,7 @@ class DataFetcherManager:
             股票中文名称，所有数据源都失败则返回 None
         """
         raw_stock_code = (stock_code or "").strip()
-        # Normalize code while preserving dotted exchange hints.
+        # Normalize code for cache lookups.
         stock_code = normalize_stock_code(stock_code)
         static_name = STOCK_NAME_MAP.get(stock_code)
 
