@@ -12,7 +12,7 @@
 
 - 本文件为 Phase 0 合同与验收边界文档，当前 PR 为 docs + runtime fix，本轮同步补齐 `baostock_fetcher.py`、`pytdx_fetcher.py`、`tushare_fetcher.py` 的 A 股代码归属边界，并配套由 `tests/test_a_share_fetcher_code_conversion.py` 做回归验证。
 - 归属边界必须覆盖裸码与前缀码（如 `000001`、`000001.SZ`、`SH000001`、`SH.000001`、`SZ000001`、`SZ.000001`），避免把 SH/SZ 前缀语义误归类。
-- 若无新 Token/模型提供商/接口映射要求，本轮不扩展 Tushare `600/601/603/688` 外规则（如 `605xxx`）；该问题继续由后续专门 PR 跟进。
+- 若无新增 LLM 相关 provider/model/Base URL 语义迁移需求，本轮收敛 Tushare A 股归属范围至：`600/601/603/605/688`、`000/001/002/003/300/301`，并同步回归 `605`、`001`、`003`、`301` 场景；该范围变更不视为 provider 配置/路由策略扩展。
 
 ## 非目标
 
