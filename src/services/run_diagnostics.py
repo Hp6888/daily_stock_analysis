@@ -23,14 +23,45 @@ _CURRENT_CONTEXT: ContextVar[Optional["RunDiagnosticContext"]] = ContextVar(
     default=None,
 )
 
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(authorization)\s*[:=]\s*(?:Bearer|Basic|Token)?\s*[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
-    re.compile(
-        r"(?i)\b(api[_-]?key|access[_-]?token|token|secret|password|passwd|cookie)"
-        r"\s*[:=]\s*([^\s,&]+)"
+_SECRET_REDACTIONS = (
+    (
+        re.compile(r"(?i)\b(authorization)\s*[:=]\s*(?:(?:Bearer|Basic|Token)\s+)?[^\s,&;]+"),
+        lambda match: f"{match.group(1)}=<redacted>",
     ),
-    re.compile(r"https?://[^\s]+?(?:token|key|secret|webhook)[^\s]*", re.IGNORECASE),
+    (
+        re.compile(r"(https?://)([^/\s:@]+):([^@\s/]+)@"),
+        r"\1<redacted>:<redacted>@",
+    ),
+    (
+        re.compile(r"https?://[^\s]+?(?:token|key|secret|webhook)[^\s]*", re.IGNORECASE),
+        "<redacted-url>",
+    ),
+    (
+        re.compile(
+            r"(?i)([\"']?)"
+            r"([A-Z0-9_]*?(?:api[_-]?key|access[_-]?token|token|secret|password|passwd|cookie))"
+            r"\1\s*:\s*([\"'])([^\"']+)\3"
+        ),
+        lambda match: f"{match.group(1)}{match.group(2)}{match.group(1)}: {match.group(3)}<redacted>{match.group(3)}",
+    ),
+    (
+        re.compile(
+            r"(?i)\b([A-Z0-9_]*?(?:api[_-]?key|access[_-]?token|token|secret|password|passwd|cookie))"
+            r"\s*=\s*([^\s,&;]+)"
+        ),
+        lambda match: f"{match.group(1)}=<redacted>",
+    ),
+    (
+        re.compile(
+            r"(?i)\b(api[_-]?key|access[_-]?token|token|secret|password|passwd|cookie)"
+            r"\s*:\s*([^\s,&;]+)"
+        ),
+        lambda match: f"{match.group(1)}=<redacted>",
+    ),
+    (
+        re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
+        "Bearer <redacted>",
+    ),
 )
 
 
@@ -48,15 +79,8 @@ def sanitize_diagnostic_text(value: Any, *, max_length: int = 300) -> Optional[s
     if not text:
         return None
 
-    for pattern in _SECRET_PATTERNS:
-        if "authorization" in pattern.pattern:
-            text = pattern.sub(lambda match: f"{match.group(1)}=<redacted>", text)
-        elif "Bearer" in pattern.pattern:
-            text = pattern.sub("Bearer <redacted>", text)
-        elif "https?" in pattern.pattern:
-            text = pattern.sub("<redacted-url>", text)
-        else:
-            text = pattern.sub(lambda match: f"{match.group(1)}=<redacted>", text)
+    for pattern, replacement in _SECRET_REDACTIONS:
+        text = pattern.sub(replacement, text)
 
     if len(text) > max_length:
         return f"{text[:max_length].rstrip()}..."

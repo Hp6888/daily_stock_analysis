@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from api.v1.endpoints.history import get_history_diagnostics
 from src.services.history_service import HistoryService
-from src.services.run_diagnostics import build_run_diagnostic_summary
+from src.services.run_diagnostics import build_run_diagnostic_summary, sanitize_diagnostic_text
 
 
 def _diagnostic_snapshot() -> dict:
@@ -291,6 +291,78 @@ class RunDiagnosticsP2TestCase(unittest.TestCase):
         self.assertNotIn("sk-live-token-abc123", summary["copy_text"])
         self.assertNotIn("sk-raw-token-xyz789", summary["copy_text"])
         self.assertNotIn("Bearer sk-", summary["copy_text"])
+
+    def test_copy_text_redacts_env_json_and_proxy_credentials(self) -> None:
+        diagnostics = _diagnostic_snapshot()
+        diagnostics["llm_runs"] = [
+            {
+                "trace_id": "trace-p2",
+                "model": "deepseek-chat",
+                "success": False,
+                "error_type": "ProxyError",
+                "error_message_sanitized": (
+                    "OPENAI_API_KEY=sk-env-secret "
+                    "\"api_key\": \"sk-json-secret\" "
+                    "proxy http://proxy_user:proxy_pass@proxy.example.com"
+                ),
+            }
+        ]
+
+        summary = build_run_diagnostic_summary(
+            context_snapshot={
+                "diagnostics": diagnostics,
+                "news_content": "news summary",
+            },
+            raw_result={
+                "success": False,
+                "error_message": (
+                    "DEEPSEEK_API_KEY=sk-raw-secret "
+                    "'access_token': 'raw-token-secret' "
+                    "http://raw_user:raw_pass@proxy.internal"
+                ),
+            },
+            report_saved=True,
+        )
+
+        copy_text = summary["copy_text"]
+        self.assertIn("OPENAI_API_KEY=<redacted>", copy_text)
+        self.assertIn("\"api_key\": \"<redacted>\"", copy_text)
+        self.assertIn("http://<redacted>:<redacted>@proxy.example.com", copy_text)
+        for leaked in (
+            "sk-env-secret",
+            "sk-json-secret",
+            "proxy_user",
+            "proxy_pass",
+        ):
+            self.assertNotIn(leaked, copy_text)
+
+    def test_sanitize_diagnostic_text_redacts_common_secret_shapes(self) -> None:
+        text = (
+            "OPENAI_API_KEY=sk-env-secret "
+            "\"api_key\": \"sk-json-secret\" "
+            "'access_token': 'raw-token-secret' "
+            "http://proxy_user:proxy_pass@proxy.example.com "
+            "Authorization: Bearer sk-auth-secret"
+        )
+
+        sanitized = sanitize_diagnostic_text(text)
+
+        self.assertIsNotNone(sanitized)
+        self.assertIn("OPENAI_API_KEY=<redacted>", sanitized)
+        self.assertIn("\"api_key\": \"<redacted>\"", sanitized)
+        self.assertIn("'access_token': '<redacted>'", sanitized)
+        self.assertIn("http://<redacted>:<redacted>@proxy.example.com", sanitized)
+        self.assertIn("Authorization=<redacted>", sanitized)
+        for leaked in (
+            "sk-env-secret",
+            "sk-json-secret",
+            "sk-raw-secret",
+            "raw-token-secret",
+            "proxy_user",
+            "proxy_pass",
+            "sk-auth-secret",
+        ):
+            self.assertNotIn(leaked, sanitized)
 
     def test_legacy_report_without_diagnostics_returns_unknown(self) -> None:
         summary = build_run_diagnostic_summary(
