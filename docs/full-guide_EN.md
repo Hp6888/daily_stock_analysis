@@ -178,8 +178,8 @@ To get started quickly, you need at minimum:
 
 ### 5. Done!
 
-Default schedule: Every weekday at **18:00 (Beijing Time)** is executed by the default workflow cron; when repository-level `SCHEDULE_TIME` is not set, the trigger remains the workflow default.
-`SCHEDULE_TIME` currently only affects local built-in scheduling via `python main.py --schedule` and does not change GitHub Actions trigger timing. Change the workflow `cron` to adjust Actions execution time.
+Default schedule: Every weekday at **18:00 (Beijing Time)** is executed by the default workflow cron; it is fixed by the workflow configuration.
+`SCHEDULE_TIME` for `python main.py --schedule` comes from local runtime environment or `.env` and is not injected from GitHub Actions repository variables, so it does not change GitHub Actions trigger timing. Change the workflow `cron` to adjust Actions execution time.
 > This section is an Issue #1497 docs-only boundary clarification (reference-only, no runtime delivery), and does not include workflow-trigger implementation changes.
 
 ---
@@ -344,7 +344,7 @@ For the notification baseline, diagnostics, and deployment notes, see [Notificat
 | `MARKET_REVIEW_REGION` | Market review region: cn (A-shares), hk (HK stocks), us (US stocks), both (all three markets) | `cn` |
 | `MARKET_REVIEW_COLOR_SCHEME` | Index change color style in market reviews: `green_up` = green gains/red losses (default), `red_up` = red gains/green losses | `green_up` |
 | `SCHEDULE_ENABLED` | Enable scheduled tasks | `false` |
-| `SCHEDULE_TIME` | Local built-in scheduler execution time; GitHub Actions trigger time is still controlled by workflow `cron` | `18:00` |
+| `SCHEDULE_TIME` | Local built-in scheduler execution time (`python main.py --schedule`), from local runtime env or `.env`; Actions repository variable is not consumed by local scheduler | `18:00` |
 | `SCHEDULE_RUN_IMMEDIATELY` | Run once immediately when scheduler mode starts; when unset it keeps following the legacy `RUN_IMMEDIATELY` runtime override | `true` |
 | `RUN_IMMEDIATELY` | Run once immediately for non-scheduler startup; also acts as the legacy fallback when `SCHEDULE_RUN_IMMEDIATELY` is unset | `true` |
 | `LOG_DIR` | Log directory | `./logs` |
@@ -560,8 +560,8 @@ python main.py --workers 5            # Specify concurrency
 ### GitHub Actions Schedule
 
 GitHub Actions parses `on.schedule.cron` before a job starts, so the cron expression cannot directly
-read Repository Variables, Secrets, or env values. As a result, the `SCHEDULE_TIME` repository
-variable only applies to the built-in local scheduler (`python main.py --schedule`); setting it alone
+read Repository Variables, Secrets, or env values. As a result, the Actions `SCHEDULE_TIME` repository
+variable is not injected into the local `python main.py --schedule` process; only local runtime env / `.env` controls that mode. Setting it alone
 does not change the default GitHub Actions trigger time (docs-only boundary clarification). This default workflow has not implemented this runtime control. When
 `SCHEDULE_TIME` is unset, GitHub Actions still executes at the fixed default cron (`0 10 * * 1-5`); to
 shift execution time, update `.github/workflows/00-daily-analysis.yml` cron manually.
