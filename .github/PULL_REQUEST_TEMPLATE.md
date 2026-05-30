@@ -13,6 +13,7 @@ For English contributors: please fill in English. All fields marked (EN) accept 
 - [ ] test
 
 > 文档 / 治理类边界澄清 PR（例如本 issue）请仅勾选 `docs`，不得勾选 `feat` 或 `fix`，并按规则在 Issue Link 中使用 `Refs #<issue_number>`。
+> 该约束用于防止将本类文档澄清 PR 误标为 `feat` 或使用 `Closes` / `Fixes` 自动关闭 issue。请确保仅保留 `docs` 一项勾选。
 
 > 若该 PR 为 docs-only（含本 issue 边界澄清），请务必在 Issue Link 仅填写 `Refs #<issue_number>` 或空，不得填写 `Closes` / `Fixes`（避免误关闭 Issue）。
 
