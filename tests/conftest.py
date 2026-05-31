@@ -141,11 +141,31 @@ class _ThreadlessTestClient:
         self.raise_server_exceptions = raise_server_exceptions
         self.follow_redirects = follow_redirects
         self.cookies = httpx.Cookies()
+        self._lifespan_ctx = None
+        self._lifespan_enter_count = 0
+
+    def _get_lifespan_context(self):
+        return getattr(getattr(self.app, "router", None), "lifespan_context", None)
 
     def __enter__(self):
+        lifespan_context = self._get_lifespan_context()
+        if self._lifespan_enter_count == 0 and callable(lifespan_context):
+            self._lifespan_ctx = lifespan_context(self.app)
+            asyncio.run(self._lifespan_ctx.__aenter__())
+
+        self._lifespan_enter_count += 1
         return self
 
     def __exit__(self, *args: Any) -> None:
+        if self._lifespan_enter_count == 0:
+            return None
+
+        self._lifespan_enter_count -= 1
+        if self._lifespan_enter_count == 0 and self._lifespan_ctx is not None:
+            try:
+                asyncio.run(self._lifespan_ctx.__aexit__(*args))
+            finally:
+                self._lifespan_ctx = None
         return None
 
     def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
@@ -157,7 +177,18 @@ class _ThreadlessTestClient:
                 app=self.app,
                 raise_app_exceptions=self.raise_server_exceptions,
             )
-            lifespan_context = getattr(getattr(self.app, "router", None), "lifespan_context", None)
+            if self._lifespan_enter_count > 0:
+                async with httpx.AsyncClient(
+                    transport=transport,
+                    base_url=self.base_url,
+                    follow_redirects=follow_redirects,
+                    cookies=self.cookies,
+                ) as client:
+                    response = await client.request(method, url, **kwargs)
+                    self.cookies = httpx.Cookies(client.cookies)
+                    return response
+
+            lifespan_context = self._get_lifespan_context()
             if callable(lifespan_context):
                 async with lifespan_context(self.app):
                     async with httpx.AsyncClient(
@@ -169,6 +200,7 @@ class _ThreadlessTestClient:
                         response = await client.request(method, url, **kwargs)
                         self.cookies = httpx.Cookies(client.cookies)
                         return response
+
             async with httpx.AsyncClient(
                 transport=transport,
                 base_url=self.base_url,
