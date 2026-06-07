@@ -334,26 +334,36 @@ class DailyMarketContextService:
         require_query_id_match: bool = False,
         report_language: str = "zh",
     ) -> Optional[DailyMarketContext]:
-        if (
-            not require_query_id_match
-            or not isinstance(current_query_id, str)
-            or not current_query_id.strip()
-        ):
+        if not isinstance(current_query_id, str) or not current_query_id.strip():
             return None
 
-        runtime_cache_key = self._cache_key(
-            context_date=context_date,
-            region=region,
-            report_language=report_language,
-        )
-        cached = self._cache.get(runtime_cache_key)
-        if cached is None or cached.source != "market_review_runtime":
-            return None
+        requested_query_id = current_query_id.strip()
+        runtime_cache_keys = [
+            self._cache_key(
+                context_date=context_date,
+                region=region,
+                current_query_id=requested_query_id,
+                require_query_id_match=True,
+                report_language=report_language,
+            ),
+            self._cache_key(
+                context_date=context_date,
+                region=region,
+                report_language=report_language,
+            ),
+        ]
 
-        cached_query_id = (cached.query_id or "").strip()
-        if cached_query_id != current_query_id.strip():
-            return None
-        return cached
+        for runtime_cache_key in runtime_cache_keys:
+            cached = self._cache.get(runtime_cache_key)
+            if cached is None or cached.source != "market_review_runtime":
+                continue
+
+            cached_query_id = (cached.query_id or "").strip()
+            if cached_query_id and cached_query_id != requested_query_id:
+                continue
+            return cached
+
+        return None
 
     def _run_market_review_context(
         self,
