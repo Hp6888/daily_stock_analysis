@@ -635,8 +635,8 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
                         "腾讯控股 00700 Android 安装包评分",
                         fresh,
                         snippet="应用版本 12.8，评分 4.9，安装后可查看行情。",
-                        url="https://apps.example.invalid/tencent/00700.apk",
-                        source="apps.example.invalid",
+                        url="https://finance.example.invalid/tencent/00700-rating",
+                        source="finance.example.invalid",
                     ),
                     _result(
                         "腾讯控股 00700 iOS 旧版下载",

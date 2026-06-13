@@ -2187,6 +2187,7 @@ class SearchService:
     _LOW_QUALITY_FILE_SIZE_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:kb|mb|gb)\b", re.IGNORECASE)
     _LOW_QUALITY_RATING_RE = re.compile(
         r"(?:\d{1,3}\s*%\s*好评|好评率|用户评分|"
+        r"(?:用户)?评分\s*[:：]?\s*(?:10|[0-9])(?:\.\d{1,2})?|"
         r"\b\d(?:\.\d)?\s*(?:stars?|ratings?|reviews?)\b)",
         re.IGNORECASE,
     )
