@@ -99,6 +99,16 @@ const krSuggestion = {
   score: 60,
 };
 
+const jpSuggestion = {
+  canonicalCode: "7203.T",
+  displayCode: "7203.T",
+  nameZh: "ソニーグループ",
+  market: "JP" as const,
+  matchType: "contains" as const,
+  matchField: "code" as const,
+  score: 60,
+};
+
 describe('StockAutocomplete', () => {
   const mockOnChange = vi.fn();
   const mockOnSubmit = vi.fn();
@@ -505,6 +515,42 @@ describe('StockAutocomplete', () => {
 
       expect(input).not.toHaveAttribute('data-autocomplete-mode', 'fallback');
       expect(screen.getByText('000660.KS')).toBeInTheDocument();
+    });
+
+    it('renders KR and JP market badges in the suggestion list', () => {
+      autocompleteHookImpl = () => ({
+        query: '',
+        setQuery: vi.fn(),
+        suggestions: [krSuggestion, jpSuggestion],
+        isOpen: true,
+        highlightedIndex: 0,
+        setHighlightedIndex: vi.fn(),
+        highlightPrevious: vi.fn(),
+        highlightNext: vi.fn(),
+        handleSelect: vi.fn(),
+        close: vi.fn(),
+        reset: vi.fn(),
+        isComposing: false,
+        setIsComposing: vi.fn(),
+        runtimeFallback: false,
+        error: null,
+      });
+
+      render(
+        <StockAutocomplete
+          value="000660"
+          onChange={mockOnChange}
+          onSubmit={mockOnSubmit}
+        />
+      );
+
+      const input = screen.getByDisplayValue('000660');
+      fireEvent.focus(input);
+
+      expect(screen.getByText('韩股')).toBeInTheDocument();
+      expect(screen.getByText('日股')).toBeInTheDocument();
+      expect(screen.getByText('000660.KS')).toBeInTheDocument();
+      expect(screen.getByText('7203.T')).toBeInTheDocument();
     });
 
     it('falls back to the plain input when the autocomplete tree throws during render', () => {
