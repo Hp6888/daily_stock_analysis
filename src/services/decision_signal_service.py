@@ -22,6 +22,7 @@ from src.storage import (
     to_utc_naive_datetime,
     utc_naive_now,
 )
+from src.utils.data_processing import parse_json_field
 from src.utils.sanitize import sanitize_decision_signal_payload, sanitize_decision_signal_text
 
 
@@ -69,6 +70,7 @@ class DecisionSignalService:
     ):
         self.repo = repo or DecisionSignalRepository(db_manager)
         self.portfolio_repo = portfolio_repo or PortfolioRepository(db_manager)
+        self.db = db_manager or getattr(self.repo, "db", None) or DatabaseManager.get_instance()
 
     def create_signal(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         fields, lifecycle = self._normalize_payload(payload)
@@ -162,6 +164,41 @@ class DecisionSignalService:
             page=safe_page,
             page_size=safe_page_size,
         )
+        if total == 0 and self._should_backfill_history_bound_analysis_signal(
+            stock_code=stock_code,
+            market=market_norm,
+            action=action_norm,
+            market_phase=market_phase_norm,
+            source_type=source_type_norm,
+            source_report_id=source_report_id_norm,
+            trace_id=trace_id_norm,
+            trigger_source=trigger_source_norm,
+            status=status_norm,
+            created_from=created_from_dt,
+            created_to=created_to_dt,
+            expires_from=expires_from_dt,
+            expires_to=expires_to_dt,
+            holding_only=holding_only,
+        ):
+            self._backfill_analysis_signal_from_history(source_report_id_norm)
+            rows, total = self.repo.list(
+                stock_codes=stock_codes,
+                stock_identities=stock_identities,
+                market=market_norm,
+                action=action_norm,
+                market_phase=market_phase_norm,
+                source_type=source_type_norm,
+                source_report_id=source_report_id_norm,
+                trace_id=trace_id_norm,
+                trigger_source=trigger_source_norm,
+                status=status_norm,
+                created_from=created_from_dt,
+                created_to=created_to_dt,
+                expires_from=expires_from_dt,
+                expires_to=expires_to_dt,
+                page=safe_page,
+                page_size=safe_page_size,
+            )
         return {
             "items": [self._serialize(row) for row in rows],
             "total": total,
@@ -217,6 +254,181 @@ class DecisionSignalService:
         if row is None:
             raise DecisionSignalNotFoundError(f"Decision signal not found: {signal_id}")
         return self._serialize(row)
+
+    @staticmethod
+    def _should_backfill_history_bound_analysis_signal(
+        *,
+        stock_code: Optional[Any],
+        market: Optional[str],
+        action: Optional[str],
+        market_phase: Optional[str],
+        source_type: Optional[str],
+        source_report_id: Optional[int],
+        trace_id: Optional[str],
+        trigger_source: Optional[str],
+        status: Optional[str],
+        created_from: Optional[datetime],
+        created_to: Optional[datetime],
+        expires_from: Optional[datetime],
+        expires_to: Optional[datetime],
+        holding_only: bool,
+    ) -> bool:
+        """Only lazy-backfill for the exact report section query used by Web."""
+
+        if source_type != "analysis" or source_report_id is None:
+            return False
+        return not any(
+            value not in (None, "", False)
+            for value in (
+                stock_code,
+                market,
+                action,
+                market_phase,
+                trace_id,
+                trigger_source,
+                status,
+                created_from,
+                created_to,
+                expires_from,
+                expires_to,
+                holding_only,
+            )
+        )
+
+    def _backfill_analysis_signal_from_history(self, source_report_id: int) -> None:
+        """Best-effort lazy extraction for reports saved before DecisionSignal existed."""
+
+        try:
+            record = self.db.get_analysis_history_by_id(source_report_id)
+            if record is None or getattr(record, "report_type", None) == "market_review":
+                return
+
+            raw_result = parse_json_field(getattr(record, "raw_result", None))
+            raw = raw_result if isinstance(raw_result, dict) else {}
+            context_snapshot = parse_json_field(getattr(record, "context_snapshot", None))
+            if not isinstance(context_snapshot, dict):
+                context_snapshot = None
+
+            from src.analyzer import AnalysisResult
+            from src.services.decision_signal_extractor import build_decision_signal_payload_from_report
+
+            result = AnalysisResult(
+                code=getattr(record, "code", "") or "",
+                name=getattr(record, "name", None) or raw.get("name") or "",
+                sentiment_score=self._history_int(
+                    raw.get("sentiment_score"),
+                    getattr(record, "sentiment_score", None),
+                    default=50,
+                ),
+                trend_prediction=raw.get("trend_prediction") or getattr(record, "trend_prediction", None) or "",
+                operation_advice=raw.get("operation_advice") or getattr(record, "operation_advice", None) or "",
+                decision_type=raw.get("decision_type") or "hold",
+                confidence_level=raw.get("confidence_level") or "中",
+                report_language=normalize_report_language(raw.get("report_language")),
+                action=raw.get("action"),
+                action_label=raw.get("action_label"),
+                dashboard=raw.get("dashboard") if isinstance(raw.get("dashboard"), dict) else None,
+                analysis_summary=raw.get("analysis_summary") or getattr(record, "analysis_summary", None) or "",
+                key_points=raw.get("key_points") or "",
+                risk_warning=raw.get("risk_warning") or "",
+                buy_reason=raw.get("buy_reason") or "",
+                raw_response=raw.get("raw_response"),
+                search_performed=bool(raw.get("search_performed", False)),
+                data_sources=raw.get("data_sources") or "",
+                success=bool(raw.get("success", True)),
+                error_message=raw.get("error_message"),
+                current_price=self._history_float(raw.get("current_price")),
+                change_pct=self._history_float(raw.get("change_pct")),
+                model_used=raw.get("model_used"),
+                query_id=getattr(record, "query_id", None),
+            )
+            payload = build_decision_signal_payload_from_report(
+                result,
+                context_snapshot=context_snapshot,
+                source_report_id=source_report_id,
+                trace_id=str(getattr(record, "query_id", "") or source_report_id),
+                query_source="history",
+                report_type=str(getattr(record, "report_type", "") or "simple"),
+            )
+            if payload is None:
+                return
+            self._apply_history_backfill_lifecycle(
+                payload,
+                created_at=getattr(record, "created_at", None),
+            )
+            self.create_signal(payload)
+        except Exception as exc:
+            logger.warning(
+                "Decision signal lazy backfill failed: source_report_id=%s error=%s",
+                source_report_id,
+                exc,
+                exc_info=True,
+            )
+
+    def _apply_history_backfill_lifecycle(
+        self,
+        payload: Dict[str, Any],
+        *,
+        created_at: Optional[datetime],
+    ) -> None:
+        """Anchor lazy backfill expiry to the report time instead of query time."""
+
+        if created_at is None:
+            return
+        horizon = payload.get("horizon") or self._default_horizon(
+            action=str(payload.get("action") or ""),
+            market_phase=payload.get("market_phase"),
+        )
+        if horizon:
+            payload["horizon"] = horizon
+
+        expires_at = self._history_backfill_expires_at(
+            created_at=created_at,
+            horizon=horizon,
+            market=str(payload.get("market") or ""),
+        )
+        if expires_at is None:
+            return
+        payload["expires_at"] = expires_at
+        if self._is_expired(expires_at):
+            payload["status"] = "expired"
+
+    @classmethod
+    def _history_backfill_expires_at(
+        cls,
+        *,
+        created_at: datetime,
+        horizon: Optional[str],
+        market: str,
+    ) -> Optional[datetime]:
+        base = to_utc_naive_datetime(created_at)
+        if horizon == "intraday":
+            return base + timedelta(hours=cls._intraday_fallback_hours(market))
+        days = cls._horizon_days(horizon)
+        if days is None:
+            return None
+        return base + timedelta(days=days)
+
+    @staticmethod
+    def _history_int(*values: Any, default: int) -> int:
+        for value in values:
+            if value in (None, ""):
+                continue
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                continue
+        return default
+
+    @staticmethod
+    def _history_float(value: Any) -> Optional[float]:
+        if value in (None, ""):
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
 
     def _normalize_payload(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         market = self._normalize_market(payload.get("market"))

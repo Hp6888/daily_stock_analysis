@@ -16,7 +16,7 @@ import pytest
 from src.config import Config
 from src.repositories.decision_signal_repo import DecisionSignalCreateResult
 from src.services.decision_signal_service import DecisionSignalService, DecisionSignalStorageError
-from src.storage import DatabaseManager, DecisionSignalRecord, utc_naive_now
+from src.storage import AnalysisHistory, DatabaseManager, DecisionSignalRecord, utc_naive_now
 from src.utils.sanitize import sanitize_decision_signal_text, sanitize_diagnostic_text
 
 
@@ -76,6 +76,34 @@ def _payload(**overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def _history_result(**overrides):
+    from src.analyzer import AnalysisResult
+
+    result = AnalysisResult(
+        code="600519",
+        name="贵州茅台",
+        sentiment_score=68,
+        trend_prediction="震荡偏强",
+        operation_advice="持有观察",
+        decision_type="hold",
+        confidence_level="中",
+        analysis_summary="趋势仍在，但等待量能确认。",
+        report_language="zh",
+    )
+    result.dashboard = {
+        "battle_plan": {
+            "sniper_points": {
+                "ideal_buy": "1680",
+                "stop_loss": "1600",
+            },
+            "action_checklist": ["回踩不破支撑"],
+        }
+    }
+    for key, value in overrides.items():
+        setattr(result, key, value)
+    return result
 
 
 def test_service_normalizes_fields_and_partial_plan_quality(isolated_db) -> None:
@@ -207,6 +235,60 @@ def test_service_defaults_lifecycle_and_preserves_explicit_values(isolated_db) -
         )
     )["item"]
     assert past["status"] == "expired"
+
+
+def test_list_signals_lazily_backfills_analysis_history_signal(isolated_db) -> None:
+    record_id = isolated_db.save_analysis_history(
+        result=_history_result(),
+        query_id="query-lazy-signal",
+        report_type="simple",
+        news_content="新闻摘要",
+        context_snapshot={"market_phase_summary": {"phase": "postmarket"}},
+        save_snapshot=True,
+    )
+    with isolated_db.get_session() as session:
+        row = session.query(AnalysisHistory).filter(AnalysisHistory.id == record_id).one()
+        row.created_at = utc_naive_now() - timedelta(days=10)
+        session.commit()
+    service = DecisionSignalService(db_manager=isolated_db)
+
+    listed = service.list_signals(source_type="analysis", source_report_id=record_id)
+
+    assert listed["total"] == 1
+    item = listed["items"][0]
+    assert item["source_report_id"] == record_id
+    assert item["source_type"] == "analysis"
+    assert item["trace_id"] == "query-lazy-signal"
+    assert item["trigger_source"] == "history"
+    assert item["action"] == "hold"
+    assert item["action_label"] == "持有"
+    assert item["reason"] == "趋势仍在，但等待量能确认。"
+    assert item["watch_conditions"] == '["回踩不破支撑"]'
+    assert item["status"] == "expired"
+
+    listed_again = service.list_signals(source_type="analysis", source_report_id=record_id)
+    assert listed_again["total"] == 1
+    with isolated_db.get_session() as session:
+        assert session.query(DecisionSignalRecord).count() == 1
+
+
+def test_list_signals_does_not_backfill_market_review_history(isolated_db) -> None:
+    record_id = isolated_db.save_analysis_history(
+        result=_history_result(code="MARKET", name="大盘复盘", operation_advice="查看复盘"),
+        query_id="query-lazy-market-review",
+        report_type="market_review",
+        news_content="复盘正文",
+        context_snapshot=None,
+        save_snapshot=False,
+    )
+    service = DecisionSignalService(db_manager=isolated_db)
+
+    listed = service.list_signals(source_type="analysis", source_report_id=record_id)
+
+    assert listed["total"] == 0
+    assert listed["items"] == []
+    with isolated_db.get_session() as session:
+        assert session.query(DecisionSignalRecord).count() == 0
 
 
 def test_service_plan_quality_slots_and_explicit_override(isolated_db) -> None:
