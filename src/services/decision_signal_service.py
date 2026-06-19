@@ -17,6 +17,7 @@ from src.report_language import normalize_report_language
 from src.schemas.decision_action import DecisionAction, localize_action_label
 from src.services.portfolio_service import VALID_MARKETS
 from src.storage import (
+    AnalysisHistory,
     DatabaseManager,
     DecisionSignalRecord,
     to_utc_naive_datetime,
@@ -308,10 +309,13 @@ class DecisionSignalService:
             context_snapshot = parse_json_field(getattr(record, "context_snapshot", None))
             if not isinstance(context_snapshot, dict):
                 context_snapshot = None
+            if not self._history_has_decision_source(raw=raw, record=record):
+                return
 
             from src.analyzer import AnalysisResult
             from src.services.decision_signal_extractor import build_decision_signal_payload_from_report
 
+            raw_decision_type = raw.get("decision_type")
             result = AnalysisResult(
                 code=getattr(record, "code", "") or "",
                 name=getattr(record, "name", None) or raw.get("name") or "",
@@ -322,10 +326,10 @@ class DecisionSignalService:
                 ),
                 trend_prediction=raw.get("trend_prediction") or getattr(record, "trend_prediction", None) or "",
                 operation_advice=raw.get("operation_advice") or getattr(record, "operation_advice", None) or "",
-                decision_type=raw.get("decision_type") or "hold",
+                decision_type=raw_decision_type or "",
                 confidence_level=raw.get("confidence_level") or "中",
                 report_language=normalize_report_language(raw.get("report_language")),
-                action=raw.get("action"),
+                action=raw.get("action") or raw_decision_type,
                 action_label=raw.get("action_label"),
                 dashboard=raw.get("dashboard") if isinstance(raw.get("dashboard"), dict) else None,
                 analysis_summary=raw.get("analysis_summary") or getattr(record, "analysis_summary", None) or "",
@@ -365,6 +369,18 @@ class DecisionSignalService:
                 exc_info=True,
             )
 
+    @staticmethod
+    def _history_has_decision_source(*, raw: Dict[str, Any], record: AnalysisHistory) -> bool:
+        for value in (
+            raw.get("action"),
+            raw.get("operation_advice"),
+            raw.get("decision_type"),
+            getattr(record, "operation_advice", None),
+        ):
+            if str(value or "").strip():
+                return True
+        return False
+
     def _apply_history_backfill_lifecycle(
         self,
         payload: Dict[str, Any],
@@ -375,6 +391,7 @@ class DecisionSignalService:
 
         if created_at is None:
             return
+        payload["_created_at_override"] = to_utc_naive_datetime(created_at)
         horizon = payload.get("horizon") or self._default_horizon(
             action=str(payload.get("action") or ""),
             market_phase=payload.get("market_phase"),
@@ -461,6 +478,7 @@ class DecisionSignalService:
                 market=market,
                 metadata=payload.get("metadata"),
             )
+        created_at = self._parse_datetime(payload.get("_created_at_override"))
 
         fields: Dict[str, Any] = {
             "stock_code": stock_code,
@@ -492,6 +510,8 @@ class DecisionSignalService:
             "expires_at": expires_at,
             "metadata_json": self._json_dumps(payload.get("metadata")),
         }
+        if created_at is not None:
+            fields["created_at"] = created_at
         if fields["status"] == "active" and self._is_expired(fields["expires_at"]):
             fields["status"] = "expired"
         self._validate_entry_range(fields)

@@ -248,7 +248,8 @@ def test_list_signals_lazily_backfills_analysis_history_signal(isolated_db) -> N
     )
     with isolated_db.get_session() as session:
         row = session.query(AnalysisHistory).filter(AnalysisHistory.id == record_id).one()
-        row.created_at = utc_naive_now() - timedelta(days=10)
+        report_created_at = datetime(2024, 1, 5, 14, 30)
+        row.created_at = report_created_at
         session.commit()
     service = DecisionSignalService(db_manager=isolated_db)
 
@@ -265,6 +266,7 @@ def test_list_signals_lazily_backfills_analysis_history_signal(isolated_db) -> N
     assert item["reason"] == "趋势仍在，但等待量能确认。"
     assert item["watch_conditions"] == '["回踩不破支撑"]'
     assert item["status"] == "expired"
+    assert datetime.fromisoformat(item["created_at"]) == report_created_at
 
     listed_again = service.list_signals(source_type="analysis", source_report_id=record_id)
     assert listed_again["total"] == 1
@@ -278,6 +280,25 @@ def test_list_signals_does_not_backfill_market_review_history(isolated_db) -> No
         query_id="query-lazy-market-review",
         report_type="market_review",
         news_content="复盘正文",
+        context_snapshot=None,
+        save_snapshot=False,
+    )
+    service = DecisionSignalService(db_manager=isolated_db)
+
+    listed = service.list_signals(source_type="analysis", source_report_id=record_id)
+
+    assert listed["total"] == 0
+    assert listed["items"] == []
+    with isolated_db.get_session() as session:
+        assert session.query(DecisionSignalRecord).count() == 0
+
+
+def test_list_signals_does_not_backfill_ambiguous_history_advice(isolated_db) -> None:
+    record_id = isolated_db.save_analysis_history(
+        result=_history_result(operation_advice="", decision_type="", action=None, action_label=None),
+        query_id="query-lazy-ambiguous-signal",
+        report_type="simple",
+        news_content="新闻摘要",
         context_snapshot=None,
         save_snapshot=False,
     )
