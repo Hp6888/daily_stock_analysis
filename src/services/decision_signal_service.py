@@ -14,7 +14,11 @@ from src.core.trading_calendar import MarketPhase
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.repositories.portfolio_repo import PortfolioRepository
 from src.report_language import normalize_report_language
-from src.schemas.decision_action import DecisionAction, localize_action_label
+from src.schemas.decision_action import (
+    DecisionAction,
+    build_action_fields,
+    localize_action_label,
+)
 from src.services.portfolio_service import VALID_MARKETS
 from src.storage import (
     AnalysisHistory,
@@ -309,13 +313,16 @@ class DecisionSignalService:
             context_snapshot = parse_json_field(getattr(record, "context_snapshot", None))
             if not isinstance(context_snapshot, dict):
                 context_snapshot = None
-            if not self._history_has_decision_source(raw=raw, record=record):
+            history_action, history_action_label = self._history_action_fields(
+                raw=raw,
+                record=record,
+            )
+            if history_action is None:
                 return
 
             from src.analyzer import AnalysisResult
             from src.services.decision_signal_extractor import build_decision_signal_payload_from_report
 
-            raw_decision_type = raw.get("decision_type")
             result = AnalysisResult(
                 code=getattr(record, "code", "") or "",
                 name=getattr(record, "name", None) or raw.get("name") or "",
@@ -326,11 +333,11 @@ class DecisionSignalService:
                 ),
                 trend_prediction=raw.get("trend_prediction") or getattr(record, "trend_prediction", None) or "",
                 operation_advice=raw.get("operation_advice") or getattr(record, "operation_advice", None) or "",
-                decision_type=raw_decision_type or "",
+                decision_type=raw.get("decision_type") or "",
                 confidence_level=raw.get("confidence_level") or "中",
                 report_language=normalize_report_language(raw.get("report_language")),
-                action=raw.get("action") or raw_decision_type,
-                action_label=raw.get("action_label"),
+                action=history_action,
+                action_label=history_action_label,
                 dashboard=raw.get("dashboard") if isinstance(raw.get("dashboard"), dict) else None,
                 analysis_summary=raw.get("analysis_summary") or getattr(record, "analysis_summary", None) or "",
                 key_points=raw.get("key_points") or "",
@@ -371,15 +378,30 @@ class DecisionSignalService:
 
     @staticmethod
     def _history_has_decision_source(*, raw: Dict[str, Any], record: AnalysisHistory) -> bool:
-        for value in (
-            raw.get("action"),
-            raw.get("operation_advice"),
-            raw.get("decision_type"),
-            getattr(record, "operation_advice", None),
-        ):
-            if str(value or "").strip():
-                return True
-        return False
+        action, _ = DecisionSignalService._history_action_fields(raw=raw, record=record)
+        return action is not None
+
+    @staticmethod
+    def _history_action_fields(
+        *,
+        raw: Dict[str, Any],
+        record: AnalysisHistory,
+    ) -> tuple[Optional[str], Optional[str]]:
+        raw_operation_advice = raw.get("operation_advice")
+        normalized_operation_advice = str(raw_operation_advice).strip() if raw_operation_advice is not None else None
+        if not normalized_operation_advice:
+            normalized_operation_advice = getattr(record, "operation_advice", None)
+        raw_action = raw.get("action")
+        normalized_action = str(raw_action).strip() if raw_action is not None else None
+        if not normalized_action:
+            normalized_action = None
+        action_fields = build_action_fields(
+            operation_advice=normalized_operation_advice,
+            explicit_action=normalized_action,
+            report_type=getattr(record, "report_type", ""),
+            report_language=raw.get("report_language"),
+        )
+        return action_fields["action"], action_fields["action_label"]
 
     def _apply_history_backfill_lifecycle(
         self,

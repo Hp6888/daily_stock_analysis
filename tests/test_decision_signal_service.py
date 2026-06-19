@@ -312,6 +312,51 @@ def test_list_signals_does_not_backfill_ambiguous_history_advice(isolated_db) ->
         assert session.query(DecisionSignalRecord).count() == 0
 
 
+def test_list_signals_does_not_backfill_ambiguous_history_default_decision_type_hold(isolated_db) -> None:
+    record_id = isolated_db.save_analysis_history(
+        result=_history_result(operation_advice="", action=None, action_label=None),
+        query_id="query-lazy-ambiguous-hold",
+        report_type="simple",
+        news_content="新闻摘要",
+        context_snapshot=None,
+        save_snapshot=False,
+    )
+    service = DecisionSignalService(db_manager=isolated_db)
+
+    listed = service.list_signals(source_type="analysis", source_report_id=record_id)
+
+    assert listed["total"] == 0
+    assert listed["items"] == []
+    with isolated_db.get_session() as session:
+        assert session.query(DecisionSignalRecord).count() == 0
+
+
+def test_list_signals_does_not_backfill_ambiguous_history_default_decision_type_hold_with_noisy_advice(
+    isolated_db,
+) -> None:
+    record_id = isolated_db.save_analysis_history(
+        result=_history_result(
+            operation_advice="买盘增强，继续观察",
+            decision_type="hold",
+            action=None,
+            action_label=None,
+        ),
+        query_id="query-lazy-ambiguous-noisy-hold",
+        report_type="simple",
+        news_content="新闻摘要",
+        context_snapshot=None,
+        save_snapshot=False,
+    )
+    service = DecisionSignalService(db_manager=isolated_db)
+
+    listed = service.list_signals(source_type="analysis", source_report_id=record_id)
+
+    assert listed["total"] == 0
+    assert listed["items"] == []
+    with isolated_db.get_session() as session:
+        assert session.query(DecisionSignalRecord).count() == 0
+
+
 def test_service_plan_quality_slots_and_explicit_override(isolated_db) -> None:
     service = DecisionSignalService(db_manager=isolated_db)
 
