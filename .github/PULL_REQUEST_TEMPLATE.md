@@ -24,7 +24,15 @@ For English contributors: please fill in English. All fields marked (EN) accept 
 
 > 注意：请按实际 `git diff` 全量列出文件范围（建议注明文件总数），避免遗漏文档/后端/API/前端文件导致描述不一致。
 
-- 文件总数 / 变更行数：
+> 建议先执行并粘贴以下命令输出，避免与实际 diff 不一致：
+
+```bash
+BASE_REF=$(git merge-base HEAD origin/main)
+git diff --stat "$BASE_REF"..HEAD
+git diff --name-only "$BASE_REF"..HEAD
+```
+
+- 文件总数 / 变更行数（建议粘贴 `git diff --stat "$BASE_REF"..HEAD`）：
 - 文件清单（按实际 diff 全量，逐项列出）：
 - 文档更新文件（`docs/*`）：
 
@@ -54,10 +62,15 @@ python -m pytest -m "not network"
 *(EN) If this PR changes report formatting, report rendering, or Web UI, attach screenshots of the affected report/page here; before/after screenshots are preferred when relevant. Issue/PR process screenshots, review screenshots, one-off acceptance screenshots, and temporary visual evidence should be linked from the PR body/comments, GitHub attachments, Actions artifacts, or external accessible evidence; do not commit them as repository files.)*
 
 > 如截图无法获取，请在“原因”中明确写明替代证据（如 Playwright/e2e 产物路径、审查链接）及其可追溯命令，不得留空。
+>
+> 若本 PR 修改 Web UI，建议至少补一条可复现路径，例如：
+>
+> - Playwright 截图产物：`apps/dsa-web/e2e/smoke.spec.ts`（`npx playwright test apps/dsa-web/e2e/smoke.spec.ts --grep "backtest page renders filter controls after login"`）
+> - 审查证据链接：可直接使用 Actions 产物、GitHub 评论附件或外部可访问链接。
 
-- 截图链接 / Screenshot links:
-- 前后对比 / Before & After（如有）:
-- 不适用原因 / Reason if not applicable:
+- 截图链接 / Screenshot links（必填）：
+- 前后对比 / Before & After（如有）：
+- 不适用原因 / Reason if not applicable（必填）：
 
 ## Compatibility And Risk
 
