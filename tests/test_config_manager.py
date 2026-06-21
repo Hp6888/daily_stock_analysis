@@ -106,6 +106,26 @@ class ConfigManagerTestCase(unittest.TestCase):
             template,
         )
 
+    def test_custom_webhook_template_braced_placeholders_are_escaped_for_compose(self) -> None:
+        template = '{"title":${title_json},"content":${content_json},"name":"${OTHER}"}'
+
+        self.manager.apply_updates(
+            updates=[("CUSTOM_WEBHOOK_BODY_TEMPLATE", template)],
+            sensitive_keys=set(),
+            mask_token="******",
+        )
+
+        env_content = self.env_path.read_text(encoding="utf-8")
+        self.assertIn(
+            'CUSTOM_WEBHOOK_BODY_TEMPLATE={"title":$${title_json},'
+            '"content":$${content_json},"name":"${OTHER}"}',
+            env_content,
+        )
+        self.assertEqual(
+            self.manager.read_config_map()["CUSTOM_WEBHOOK_BODY_TEMPLATE"],
+            template,
+        )
+
     def test_custom_webhook_template_canonicalizes_unescaped_existing_value(self) -> None:
         self.env_path.write_text(
             'CUSTOM_WEBHOOK_BODY_TEMPLATE={"content":$content_json}\n',

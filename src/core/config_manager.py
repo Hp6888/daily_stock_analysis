@@ -19,10 +19,16 @@ _ASSIGNMENT_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 _FALLBACK_REWRITE_ERRNOS = {errno.EBUSY, errno.EXDEV}
 _COMPOSE_ESCAPED_ENV_VALUE_KEYS = frozenset({"CUSTOM_WEBHOOK_BODY_TEMPLATE"})
 _APPLICATION_TEMPLATE_PLACEHOLDER_PATTERN = re.compile(
-    r"(?<!\$)\$(content_json|title_json|content|title)\b"
+    r"(?<!\$)\$(?:"
+    r"\{(content_json|title_json|content|title)\}"
+    r"|(content_json|title_json|content|title)\b"
+    r")"
 )
 _ESCAPED_APPLICATION_TEMPLATE_PLACEHOLDER_PATTERN = re.compile(
-    r"\$\$(content_json|title_json|content|title)\b"
+    r"\$\$(?:"
+    r"\{(content_json|title_json|content|title)\}"
+    r"|(content_json|title_json|content|title)\b"
+    r")"
 )
 
 logger = logging.getLogger(__name__)
@@ -32,14 +38,30 @@ def escape_compose_sensitive_env_value(key: str, value: str) -> str:
     """Escape app template placeholders that Docker Compose would interpolate."""
     if key.upper() not in _COMPOSE_ESCAPED_ENV_VALUE_KEYS:
         return value
-    return _APPLICATION_TEMPLATE_PLACEHOLDER_PATTERN.sub(r"$$\1", value)
+
+    def _replace(match: re.Match[str]) -> str:
+        braced_name = match.group(1)
+        plain_name = match.group(2)
+        if braced_name is not None:
+            return f"$${{{braced_name}}}"
+        return f"$${plain_name}"
+
+    return _APPLICATION_TEMPLATE_PLACEHOLDER_PATTERN.sub(_replace, value)
 
 
 def unescape_compose_sensitive_env_value(key: str, value: str) -> str:
     """Restore app template placeholders escaped for Docker Compose storage."""
     if key.upper() not in _COMPOSE_ESCAPED_ENV_VALUE_KEYS:
         return value
-    return _ESCAPED_APPLICATION_TEMPLATE_PLACEHOLDER_PATTERN.sub(r"$\1", value)
+
+    def _replace(match: re.Match[str]) -> str:
+        braced_name = match.group(1)
+        plain_name = match.group(2)
+        if braced_name is not None:
+            return f"${{{braced_name}}}"
+        return f"${plain_name}"
+
+    return _ESCAPED_APPLICATION_TEMPLATE_PLACEHOLDER_PATTERN.sub(_replace, value)
 
 
 @dataclass
@@ -108,7 +130,7 @@ class ConfigManager:
         if not self._env_path.exists():
             return {}
 
-        values = dotenv_values(self._env_path)
+        values = dotenv_values(self._env_path, interpolate=False)
         config_map: Dict[str, str] = {}
         for key, value in values.items():
             if key is None:

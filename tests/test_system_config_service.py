@@ -2639,6 +2639,32 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         }
         self.assertEqual(items["CUSTOM_WEBHOOK_BODY_TEMPLATE"]["value"], template)
 
+    @patch.object(SystemConfigService, "_reload_runtime_singletons")
+    def test_update_escapes_braced_custom_webhook_template_and_runtime_reads_literals(
+        self,
+        _mock_reload_runtime_singletons,
+    ) -> None:
+        template = '{"content":${content_json}}'
+
+        response = self.service.update(
+            config_version=self.manager.get_config_version(),
+            items=[{"key": "CUSTOM_WEBHOOK_BODY_TEMPLATE", "value": template}],
+            reload_now=True,
+        )
+
+        self.assertTrue(response["success"])
+        self.assertIn(
+            'CUSTOM_WEBHOOK_BODY_TEMPLATE={"content":$${content_json}}\n',
+            self.env_path.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(Config.get_instance().custom_webhook_body_template, template)
+
+        items = {
+            item["key"]: item
+            for item in self.service.get_config(include_schema=True)["items"]
+        }
+        self.assertEqual(items["CUSTOM_WEBHOOK_BODY_TEMPLATE"]["value"], template)
+
     def test_update_raises_conflict_for_stale_version(self) -> None:
         with self.assertRaises(ConfigConflictError):
             self.service.update(

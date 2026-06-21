@@ -605,7 +605,26 @@ def setup_env(override: bool = False):
         env_path = Path(env_file)
     else:
         env_path = Path(__file__).parent.parent / '.env'
+    compose_sensitive_keys = ("CUSTOM_WEBHOOK_BODY_TEMPLATE",)
+    preexisting_compose_sensitive_keys = {
+        key for key in compose_sensitive_keys if key in os.environ
+    }
     load_dotenv(dotenv_path=env_path, override=override)
+    try:
+        raw_env_values = dotenv_values(env_path, interpolate=False)
+    except Exception as exc:  # pragma: no cover - defensive branch
+        logger.warning("Failed to read raw .env values from %s: %s", env_path, exc)
+        return
+
+    key = "CUSTOM_WEBHOOK_BODY_TEMPLATE"
+    if key in raw_env_values and (
+        override or key not in preexisting_compose_sensitive_keys
+    ):
+        raw_value = raw_env_values.get(key)
+        os.environ[key] = unescape_compose_sensitive_env_value(
+            key,
+            "" if raw_value is None else str(raw_value),
+        )
 
 
 @dataclass

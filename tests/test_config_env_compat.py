@@ -588,6 +588,30 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
             '{"title":$title_json,"content":$content_json}',
         )
 
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_custom_webhook_template_unescapes_compose_saved_braced_placeholders(
+        self,
+        _mock_parse_yaml,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / ".env"
+            env_path.write_text(
+                'CUSTOM_WEBHOOK_BODY_TEMPLATE={"content":$${content_json}}\n',
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"ENV_FILE": str(env_path)},
+                clear=True,
+            ):
+                config = Config._load_from_env()
+
+        self.assertEqual(
+            config.custom_webhook_body_template,
+            '{"content":${content_json}}',
+        )
+
     def test_refresh_stock_list_preserves_empty_required_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env_path = Path(temp_dir) / ".env"
