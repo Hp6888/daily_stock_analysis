@@ -543,6 +543,16 @@ class BacktestServiceTestCase(unittest.TestCase):
         self.assertIn("01810.HK", valid_variants)
         self.assertIn("HK01810", valid_variants)
 
+    def test_build_market_code_variants_rejects_wrong_explicit_exchange_for_bse_code(self) -> None:
+        self.assertEqual(
+            BacktestRepository._build_market_code_variants("920748.SH", "920748"),
+            [],
+        )
+        self.assertEqual(
+            BacktestRepository._build_market_code_variants("SH920748", "920748"),
+            [],
+        )
+
     def test_get_candidates_does_not_match_invalid_a_share_hk_cross_input(self) -> None:
         repo = BacktestRepository(self.db)
         matches = repo.get_candidates(
@@ -558,7 +568,7 @@ class BacktestServiceTestCase(unittest.TestCase):
 
     def test_get_candidates_does_not_match_explicit_wrong_a_share_market(self) -> None:
         repo = BacktestRepository(self.db)
-        for invalid_code in ("600519.SZ", "SH000001", "000001.SH"):
+        for invalid_code in ("600519.SZ", "SH000001", "000001.SH", "920748.SH", "SH920748"):
             with self.subTest(invalid_code=invalid_code):
                 matches = repo.get_candidates(
                     code=invalid_code,
@@ -585,7 +595,7 @@ class BacktestServiceTestCase(unittest.TestCase):
 
     def test_run_backtest_rejects_explicit_wrong_a_share_market(self) -> None:
         service = BacktestService(self.db)
-        for invalid_code in ("600519.SZ", "SH000001", "000001.SH"):
+        for invalid_code in ("600519.SZ", "SH000001", "000001.SH", "920748.SH", "SH920748"):
             with self.subTest(invalid_code=invalid_code):
                 with self.assertRaisesRegex(ValueError, "非法股票代码格式"):
                     service.run_backtest(
@@ -596,6 +606,33 @@ class BacktestServiceTestCase(unittest.TestCase):
                         analysis_date_from=date(2024, 1, 1),
                         analysis_date_to=date(2024, 1, 1),
                         limit=10,
+                    )
+
+    def test_get_recent_evaluations_rejects_explicit_wrong_a_share_market(self) -> None:
+        service = BacktestService(self.db)
+        for invalid_code in ("600519.SZ", "SH000001", "000001.SH", "920748.SH", "SH920748"):
+            with self.subTest(invalid_code=invalid_code):
+                with self.assertRaisesRegex(ValueError, "非法股票代码格式"):
+                    service.get_recent_evaluations(
+                        code=invalid_code,
+                        eval_window_days=3,
+                        limit=10,
+                        page=1,
+                        analysis_date_from=date(2024, 1, 1),
+                        analysis_date_to=date(2024, 1, 1),
+                    )
+
+    def test_get_summary_rejects_explicit_wrong_a_share_market(self) -> None:
+        service = BacktestService(self.db)
+        for invalid_code in ("600519.SZ", "SH000001", "000001.SH", "920748.SH", "SH920748"):
+            with self.subTest(invalid_code=invalid_code):
+                with self.assertRaisesRegex(ValueError, "非法股票代码格式"):
+                    service.get_summary(
+                        scope="stock",
+                        code=invalid_code,
+                        eval_window_days=3,
+                        analysis_date_from=date(2024, 1, 1),
+                        analysis_date_to=date(2024, 1, 1),
                     )
 
     def test_run_backtest_bare_code_query_matches_dotted_history_records(self) -> None:

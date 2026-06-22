@@ -35,15 +35,27 @@ _SUFFIX_DIGIT_LENS: dict = {
 _PRESERVE_SUFFIXES = {".T", ".KS", ".KQ"}
 
 
+def _infer_cn_exchange(base: str) -> str:
+    """Infer CN exchange from a 6-digit A/B-share code."""
+    if not (base.isdigit() and len(base) == 6):
+        return ""
+
+    if is_bse_code(base):
+        return "BJ"
+    if base.startswith(("5", "6", "9")):
+        return "SH"
+    return "SZ"
+
+
 def _valid_exchange_code(exchange: str, base: str, digit_lens: tuple[int, ...]) -> bool:
     if not (base.isdigit() and len(base) in digit_lens):
         return False
     if exchange in {"SH", "SS"}:
-        return base.startswith(("5", "6", "9"))
+        return _infer_cn_exchange(base) == "SH"
     if exchange == "SZ":
-        return not is_bse_code(base) and not base.startswith(("5", "6", "9"))
+        return _infer_cn_exchange(base) == "SZ"
     if exchange == "BJ":
-        return is_bse_code(base)
+        return _infer_cn_exchange(base) == "BJ"
     return True
 
 

@@ -562,7 +562,27 @@ class BacktestRepository:
         raw_code_upper = raw_code.upper()
         normalized_upper = normalized_code.upper() if normalized_code else ""
 
+        def _explicit_exchange() -> Optional[str]:
+            if raw_code_upper.startswith(("SH", "SS")) or raw_code_upper.endswith((".SH", ".SS")):
+                return "SH"
+            if raw_code_upper.startswith("SZ") or raw_code_upper.endswith(".SZ"):
+                return "SZ"
+            if raw_code_upper.startswith("BJ") or raw_code_upper.endswith(".BJ"):
+                return "BJ"
+            return None
+
+        def _exchange_by_code(base: str) -> str:
+            if is_bse_code(base):
+                return "BJ"
+            if base.startswith(("5", "6")):
+                return "SH"
+            return "SZ"
+
         if normalized_upper.isdigit() and len(normalized_upper) == 6:
+            explicit_exchange = _explicit_exchange()
+            if explicit_exchange is not None and explicit_exchange != _exchange_by_code(normalized_upper):
+                return []
+
             if raw_code_upper.startswith(("SH", "SS")) or raw_code_upper.endswith(".SH") or raw_code_upper.endswith(".SS"):
                 exchange = "SH"
             elif raw_code_upper.startswith("SZ") or raw_code_upper.endswith(".SZ"):
