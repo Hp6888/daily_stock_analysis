@@ -1,9 +1,9 @@
 name: 每日股票分析
 
 on:
-  # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
+  # 定时触发 - 每天北京时间 14:30 (UTC 06:30)
   schedule:
-    - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
+    - cron: '30 6 * * 1-5'     # 周一到周五，UTC 06:30 = 北京时间 14:30
   
   # 手动触发
   workflow_dispatch:
@@ -394,11 +394,16 @@ jobs:
           # 解析自选股配置：
           # 1. Repository/Environment secrets 或 Repository variables（STOCK_LIST_CONFIG）
           # 2. 同名 Environment variables 注入的 runner 环境变量（STOCK_LIST）
-          # 3. 最小默认值
+          # 3. 空值时自动运行选股脚本（筛选 A 股 ≤12 元，随机选 5 只）
           if [ -n "${STOCK_LIST_CONFIG:-}" ]; then
             export STOCK_LIST="$STOCK_LIST_CONFIG"
+            echo "📋 使用配置的自选股: $STOCK_LIST"
           elif [ -z "${STOCK_LIST:-}" ]; then
-            export STOCK_LIST="600519"
+            echo "🔍 STOCK_LIST 为空，运行自动选股..."
+            export STOCK_LIST=$(python scripts/pick_stocks.py)
+            echo "✅ 自动选股结果: $STOCK_LIST"
+          else
+            echo "📋 使用环境变量 STOCK_LIST: $STOCK_LIST"
           fi
 
           # 处理 LITELLM YAML 配置文件
