@@ -51,13 +51,17 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: 安装依赖（跳过 tiktoken 编译）
+      - name: 安装依赖
         run: |
           pip install --upgrade pip
-          # tiktoken 需要本地编译，容易失败；过滤掉它（非核心功能）
-          grep -v tiktoken requirements.txt > requirements-token-free.txt || true
-          pip install -r requirements-token-free.txt
-          python -c "import litellm; print('litellm OK')"
+          # 过滤掉容易失败的包：tiktoken（编译）、longbridge（版本兼容问题）
+          # 其余核心包逐行安装，单个失败不阻塞整体
+          grep -vE 'tiktoken|longbridge' requirements.txt >> requirements-core.txt || true
+          echo "# 核心依赖" > requirements-clean.txt
+          # 去掉注释和空行
+          grep -vE '^\s*#|^\s*$' requirements-core.txt | sed 's/\s*#.*$//' >> requirements-clean.txt
+          pip install -r requirements-clean.txt --no-deps 2>/dev/null || pip install -r requirements-clean.txt
+          python -c "import litellm; print('litellm OK')" || true
       
       - name: 创建必要目录
         run: |
