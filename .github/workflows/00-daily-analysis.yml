@@ -51,10 +51,13 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: 安装依赖
+      - name: 安装依赖（跳过 tiktoken 编译）
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          # tiktoken 需要本地编译，容易失败；过滤掉它（非核心功能）
+          grep -v tiktoken requirements.txt > requirements-token-free.txt || true
+          pip install -r requirements-token-free.txt
+          python -c "import litellm; print('litellm OK')"
       
       - name: 创建必要目录
         run: |
